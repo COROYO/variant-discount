@@ -2,7 +2,7 @@
 
 client_id = "79238e3c1802daa29eaf3b43238286ea"
 name = "variant-discounts"
-application_url = "https://example.com"
+application_url = "https://variant-discounts--shopify-variant-discounts.europe-west4.hosted.app"
 embedded = true
 
 [access_scopes]
@@ -34,7 +34,7 @@ api_version = "2026-07"
   topics = [ "products/delete" ]
 
 [auth]
-redirect_urls = [ "https://example.com/api/auth" ]
+redirect_urls = [ "https://variant-discounts--shopify-variant-discounts.europe-west4.hosted.app/auth/callback" ]
 
 [build]
 automatically_update_urls_on_dev = true

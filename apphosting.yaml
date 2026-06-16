@@ -18,7 +18,7 @@ env:
   # Shopify embedded app configuration. SHOPIFY_APP_URL is the public URL of
   # the deployed App Hosting backend and must be updated after the first deploy.
   - variable: SHOPIFY_APP_URL
-    value: https://example.com
+    value: https://variant-discounts--shopify-variant-discounts.europe-west4.hosted.app
     availability:
       - BUILD
       - RUNTIME
