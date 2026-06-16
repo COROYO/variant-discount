@@ -1,0 +1,82 @@
+.avatarWrap {
+  position: relative;
+  flex-shrink: 0;
+  width: 112px;
+  padding-bottom: 14px;
+}
+
+.avatarRing {
+  width: 100%;
+  height: 100%;
+  border-radius: 50%;
+  border: 3px solid #008060;
+  padding: 4px;
+  box-sizing: border-box;
+  background: #fff;
+  box-shadow: 0 0 0 4px rgba(0, 128, 96, 0.12);
+}
+
+.avatarImage {
+  width: 100%;
+  height: 100%;
+  border-radius: 50%;
+  object-fit: cover;
+  display: block;
+}
+
+.statusBadge {
+  position: absolute;
+  bottom: 0;
+  left: 50%;
+  transform: translateX(-50%);
+  padding: 2px 10px;
+  border-radius: 999px;
+  background: #008060;
+  color: #fff;
+  font-size: 11px;
+  font-weight: 600;
+  white-space: nowrap;
+  border: 2px solid #fff;
+}
+
+.contactHeader {
+  display: flex;
+  align-items: center;
+  gap: 20px;
+  margin-bottom: 16px;
+}
+
+.contactIntro {
+  flex: 1;
+  min-width: 0;
+}
+
+@media (max-width: 640px) {
+  .contactHeader {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+}
+
+.sidebarAvatar {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 16px;
+  padding-bottom: 16px;
+  border-bottom: 1px solid #ebebeb;
+}
+
+.sidebarAvatar .avatarWrap {
+  width: 88px;
+  padding-bottom: 12px;
+}
+
+.sidebarActiveLabel {
+  margin: 0;
+  font-size: 12px;
+  font-weight: 600;
+  color: #008060;
+  text-align: center;
+}

@@ -1,0 +1,43 @@
+.footer {
+  margin-top: 32px;
+  padding: 16px;
+  border-top: 1px solid var(--p-color-border-secondary, #e3e3e3);
+  font-family: var(
+    --p-font-family-sans,
+    Inter,
+    -apple-system,
+    BlinkMacSystemFont,
+    "San Francisco",
+    "Segoe UI",
+    Roboto,
+    "Helvetica Neue",
+    sans-serif
+  );
+}
+
+.inner {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: center;
+  gap: 8px 12px;
+  font-size: 12px;
+  line-height: 1.4;
+  color: var(--p-color-text-secondary, #616161);
+}
+
+.link {
+  color: inherit;
+  font: inherit;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+.link:hover {
+  color: var(--p-color-text, #303030);
+}
+
+.separator {
+  color: var(--p-color-text-secondary, #616161);
+  user-select: none;
+}

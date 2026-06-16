@@ -21,34 +21,39 @@ export default function App() {
   return (
     <div className={styles.index}>
       <div className={styles.content}>
-        <h1 className={styles.heading}>A short heading about [your app]</h1>
+        <h1 className={styles.heading}>Variant Discounts</h1>
         <p className={styles.text}>
-          A tagline about [your app] that describes your value proposition.
+          Rabattiere gezielt einzelne Produktvarianten – z.&nbsp;B. nur die
+          50&nbsp;g-Variante, nicht die 100&nbsp;g-Variante desselben Produkts.
+          Automatische Rabatte oder Rabattcodes, direkt in Shopify-Checkout.
         </p>
         {showForm && (
           <Form className={styles.form} method="post" action="/auth/login">
             <label className={styles.label}>
-              <span>Shop domain</span>
+              <span>Shop-Domain</span>
               <input className={styles.input} type="text" name="shop" />
-              <span>e.g: my-shop-domain.myshopify.com</span>
+              <span>z.&nbsp;B.: dein-shop.myshopify.com</span>
             </label>
             <button className={styles.button} type="submit">
-              Log in
+              Einloggen
             </button>
           </Form>
         )}
         <ul className={styles.list}>
           <li>
-            <strong>Product feature</strong>. Some detail about your feature and
-            its benefit to your customer.
+            <strong>Varianten-genau:</strong> Wähle exakt die Varianten aus, die
+            rabattiert werden sollen – oder lass die App automatisch nur nicht
+            reduzierte Artikel erfassen.
           </li>
           <li>
-            <strong>Product feature</strong>. Some detail about your feature and
-            its benefit to your customer.
+            <strong>Automatisch oder per Code:</strong> Lege automatische
+            Rabatte oder Rabattcodes mit individueller Laufzeit und Nutzungs­zähler
+            an.
           </li>
           <li>
-            <strong>Product feature</strong>. Some detail about your feature and
-            its benefit to your customer.
+            <strong>Shopify-nativ:</strong> Rabatte werden über eine Shopify
+            Function direkt im Checkout angewendet – ohne Skripte im Theme,
+            kompatibel mit anderen Rabatten.
           </li>
         </ul>
       </div>
