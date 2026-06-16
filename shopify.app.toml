@@ -2,7 +2,7 @@
 
 client_id = "9933bf7ff01bbe0f820eba987e8029cf"
 name = "variant-discounts"
-application_url = "https://variant-discounts--shopify-variant-discounts.europe-west4.hosted.app"
+application_url = "https://variant-discounts.shrimpsoft.de"
 embedded = true
 
 [access_scopes]
@@ -34,7 +34,7 @@ api_version = "2026-07"
   topics = [ "products/delete" ]
 
 [auth]
-redirect_urls = [ "https://variant-discounts--shopify-variant-discounts.europe-west4.hosted.app/auth/callback" ]
+redirect_urls = [ "https://variant-discounts.shrimpsoft.de/auth/callback" ]
 
 [build]
 automatically_update_urls_on_dev = true
