@@ -20,6 +20,7 @@ import {
   deleteRemovedCodeNodes,
   getRule,
   getRuleCodeUsage,
+  PlanLimitError,
   updateRule,
   type RuleCode,
   type RuleDiscountType,
@@ -30,10 +31,12 @@ import {
   type RuleVariant,
 } from "../models/rules.server";
 import type { CodeUsageInfo } from "../models/discount.server";
+import { getCurrentPlan } from "../models/plan.server";
 
 export const loader = async ({ request, params }: LoaderFunctionArgs) => {
   const { admin, session } = await authenticate.admin(request);
   const id = params.id ?? "new";
+  const plan = await getCurrentPlan(admin);
 
   const emptyUsage: Record<string, CodeUsageInfo> = {};
 
@@ -53,6 +56,7 @@ export const loader = async ({ request, params }: LoaderFunctionArgs) => {
         codes: [] as RuleCode[],
       },
       usage: emptyUsage,
+      plan,
     };
   }
 
@@ -77,6 +81,7 @@ export const loader = async ({ request, params }: LoaderFunctionArgs) => {
       codes: rule.codes,
     },
     usage,
+    plan,
   };
 };
 
@@ -84,6 +89,7 @@ export const action = async ({ request, params }: ActionFunctionArgs) => {
   const { admin, session } = await authenticate.admin(request);
   const id = params.id ?? "new";
   const body = (await request.json()) as Partial<RuleFormInput>;
+  const plan = await getCurrentPlan(admin);
 
   // Capture the codes as they were before saving so we can delete the discount
   // nodes of any codes the merchant removed.
@@ -104,12 +110,19 @@ export const action = async ({ request, params }: ActionFunctionArgs) => {
   };
 
   let ruleId: string;
-  if (id === "new") {
-    const created = await createRule(session.shop, input);
-    ruleId = created.id;
-  } else {
-    await updateRule(session.shop, id, input);
-    ruleId = id;
+  try {
+    if (id === "new") {
+      const created = await createRule(session.shop, input, plan);
+      ruleId = created.id;
+    } else {
+      await updateRule(session.shop, id, input, plan);
+      ruleId = id;
+    }
+  } catch (error) {
+    if (error instanceof PlanLimitError) {
+      return { ok: false as const, error: error.message, warning: null };
+    }
+    throw error;
   }
 
   // The rule is saved regardless; surface a sync failure (e.g. function not yet
@@ -121,9 +134,10 @@ export const action = async ({ request, params }: ActionFunctionArgs) => {
     return {
       ok: true as const,
       warning: error instanceof Error ? error.message : String(error),
+      error: null,
     };
   }
-  return { ok: true as const, warning: null };
+  return { ok: true as const, warning: null, error: null };
 };
 
 function readValue(event: Event): string {
@@ -148,7 +162,7 @@ function localInputToIso(local: string): string | null {
 }
 
 export default function RuleEditor() {
-  const { rule, usage } = useLoaderData<typeof loader>();
+  const { rule, usage, plan } = useLoaderData<typeof loader>();
   const actionData = useActionData<typeof action>();
   const navigate = useNavigate();
   const navigation = useNavigation();
@@ -178,7 +192,13 @@ export default function RuleEditor() {
   const isSaving = navigation.state === "submitting";
 
   useEffect(() => {
-    if (!actionData?.ok) return;
+    if (!actionData) return;
+    if (!actionData.ok) {
+      if (actionData.error) {
+        shopify.toast.show(actionData.error, { isError: true, duration: 8000 });
+      }
+      return;
+    }
     if (actionData.warning) {
       shopify.toast.show(
         `Gespeichert, aber Rabatt konnte nicht synchronisiert werden: ${actionData.warning}`,
@@ -402,11 +422,19 @@ export default function RuleEditor() {
             <s-text color="subdued">
               Füge einen oder mehrere Codes hinzu, mit denen Kund:innen diesen
               Rabatt im Checkout einlösen können. Mit Enter bestätigen oder eine
-              CSV importieren (ein Code pro Zeile oder kommagetrennt). Jeder Code
-              kann einzeln deaktiviert und mit Start-/Endzeit versehen werden;
-              ohne Zeitangabe gilt er sofort und unbegrenzt, bis er deaktiviert
-              wird. Änderungen greifen nach dem Speichern.
+              CSV importieren (ein Code pro Zeile oder kommagetrennt). Jeder
+              Code kann einzeln deaktiviert werden.{" "}
+              {plan.features.codeScheduling
+                ? "Mit Start-/Endzeit versehen; ohne Zeitangabe gilt er sofort und unbegrenzt, bis er deaktiviert wird."
+                : "Code-Planung (Start-/Endzeit pro Code) ist nur im Pro-Plan verfügbar."}{" "}
+              Änderungen greifen nach dem Speichern.
             </s-text>
+            {!plan.features.codeScheduling ? (
+              <s-banner tone="info">
+                Upgrade auf Pro, um pro Code eine Start- und Endzeit zu
+                hinterlegen.
+              </s-banner>
+            ) : null}
             <s-stack direction="inline" gap="base" alignItems="end">
               <s-text-field
                 ref={(element) => {
@@ -496,48 +524,50 @@ export default function RuleEditor() {
                             : "Noch nicht synchronisiert"}
                         </s-text>
 
-                        <s-stack direction="inline" gap="base">
-                          <label
-                            style={{
-                              display: "flex",
-                              flexDirection: "column",
-                              fontSize: "0.85em",
-                            }}
-                          >
-                            Start (optional)
-                            <input
-                              type="datetime-local"
-                              value={isoToLocalInput(codeEntry.startsAt)}
-                              onChange={(event) =>
-                                updateCodeAt(index, {
-                                  startsAt: localInputToIso(
-                                    event.currentTarget.value,
-                                  ),
-                                })
-                              }
-                            />
-                          </label>
-                          <label
-                            style={{
-                              display: "flex",
-                              flexDirection: "column",
-                              fontSize: "0.85em",
-                            }}
-                          >
-                            Ende (optional)
-                            <input
-                              type="datetime-local"
-                              value={isoToLocalInput(codeEntry.endsAt)}
-                              onChange={(event) =>
-                                updateCodeAt(index, {
-                                  endsAt: localInputToIso(
-                                    event.currentTarget.value,
-                                  ),
-                                })
-                              }
-                            />
-                          </label>
-                        </s-stack>
+                        {plan.features.codeScheduling ? (
+                          <s-stack direction="inline" gap="base">
+                            <label
+                              style={{
+                                display: "flex",
+                                flexDirection: "column",
+                                fontSize: "0.85em",
+                              }}
+                            >
+                              Start (optional)
+                              <input
+                                type="datetime-local"
+                                value={isoToLocalInput(codeEntry.startsAt)}
+                                onChange={(event) =>
+                                  updateCodeAt(index, {
+                                    startsAt: localInputToIso(
+                                      event.currentTarget.value,
+                                    ),
+                                  })
+                                }
+                              />
+                            </label>
+                            <label
+                              style={{
+                                display: "flex",
+                                flexDirection: "column",
+                                fontSize: "0.85em",
+                              }}
+                            >
+                              Ende (optional)
+                              <input
+                                type="datetime-local"
+                                value={isoToLocalInput(codeEntry.endsAt)}
+                                onChange={(event) =>
+                                  updateCodeAt(index, {
+                                    endsAt: localInputToIso(
+                                      event.currentTarget.value,
+                                    ),
+                                  })
+                                }
+                              />
+                            </label>
+                          </s-stack>
+                        ) : null}
                       </s-stack>
                     </s-box>
                   );

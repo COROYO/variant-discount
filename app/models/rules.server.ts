@@ -1,5 +1,6 @@
 import { FieldValue, Timestamp } from "firebase-admin/firestore";
 import db from "../db.server";
+import { getPlan, type PlanDefinition, type PlanId } from "../config/plans.shared";
 import { setJsonMetafield, type AdminGraphqlClient } from "./admin-graphql.server";
 import {
   createCodeNode,
@@ -12,6 +13,30 @@ import {
   updateCodeNodeSchedule,
   type CodeUsageInfo,
 } from "./discount.server";
+
+/** Thrown when a write would exceed the shop's current plan limits. */
+export class PlanLimitError extends Error {
+  constructor(
+    message: string,
+    readonly limit: number,
+    readonly current: number,
+    readonly planId: PlanId,
+  ) {
+    super(message);
+    this.name = "PlanLimitError";
+  }
+}
+
+/** Count rules for a shop. Cheaper than fetching every doc. */
+export async function countRules(shop: string): Promise<number> {
+  const snapshot = await rulesCollection().where("shop", "==", shop).count().get();
+  return snapshot.data().count;
+}
+
+/** Drop start/end scheduling from every code when the plan doesn't allow it. */
+function stripCodeScheduling(codes: RuleCode[]): RuleCode[] {
+  return codes.map((code) => ({ ...code, startsAt: null, endsAt: null }));
+}
 
 export type RuleValueType = "percentage" | "fixedAmount";
 export type RuleStatus = "active" | "draft";
@@ -208,12 +233,26 @@ export async function getRule(
 export async function createRule(
   shop: string,
   input: RuleFormInput,
+  plan: PlanDefinition = getPlan(undefined),
 ): Promise<RuleData> {
+  const count = await countRules(shop);
+  if (count >= plan.limits.maxRules) {
+    throw new PlanLimitError(
+      `Plan-Limit erreicht: Im ${plan.name}-Plan sind maximal ${plan.limits.maxRules} Regeln möglich.`,
+      plan.limits.maxRules,
+      count,
+      plan.id,
+    );
+  }
+  const sanitized = sanitize(input);
+  const finalInput = plan.features.codeScheduling
+    ? sanitized
+    : { ...sanitized, codes: stripCodeScheduling(sanitized.codes) };
   const now = FieldValue.serverTimestamp();
   const docRef = rulesCollection().doc();
   await docRef.set({
     shop,
-    ...sanitize(input),
+    ...finalInput,
     discountId: null,
     createdAt: now,
     updatedAt: now,
@@ -227,6 +266,7 @@ export async function updateRule(
   shop: string,
   id: string,
   input: RuleFormInput,
+  plan: PlanDefinition = getPlan(undefined),
 ): Promise<RuleData | null> {
   const docRef = rulesCollection().doc(id);
   const snapshot = await docRef.get();
@@ -234,7 +274,14 @@ export async function updateRule(
   if (!snapshot.exists || (snapshot.data() as RuleDoc).shop !== shop) {
     return null;
   }
-  await docRef.update({ ...sanitize(input), updatedAt: FieldValue.serverTimestamp() });
+  const sanitized = sanitize(input);
+  const finalInput = plan.features.codeScheduling
+    ? sanitized
+    : { ...sanitized, codes: stripCodeScheduling(sanitized.codes) };
+  await docRef.update({
+    ...finalInput,
+    updatedAt: FieldValue.serverTimestamp(),
+  });
   return getRule(shop, id);
 }
 

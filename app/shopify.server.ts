@@ -6,6 +6,7 @@ import {
 } from "@shopify/shopify-app-react-router/server";
 import db from "./db.server";
 import { FirestoreSessionStorage } from "./firestore-session-storage.server";
+import { verifyWebhookHmacAndRebuild } from "./utils/verify-webhook-hmac.server";
 
 const shopify = shopifyApp({
   apiKey: process.env.SHOPIFY_API_KEY,
@@ -100,8 +101,20 @@ export const authenticate: typeof baseAuthenticate = {
   ...baseAuthenticate,
   admin: ((request: Request) =>
     baseAuthenticate.admin(patchEdgeUserAgent(request))) as typeof baseAuthenticate.admin,
-  webhook: ((request: Request) =>
-    baseAuthenticate.webhook(patchEdgeUserAgent(request))) as typeof baseAuthenticate.webhook,
+  webhook: (async (request: Request) => {
+    // Explicit HMAC verification before delegating to the library, so that
+    // any request with a missing or invalid `X-Shopify-Hmac-Sha256` header is
+    // rejected with 401 before it reaches a handler.
+    const verified = await verifyWebhookHmacAndRebuild(
+      request,
+      process.env.SHOPIFY_API_SECRET ?? "",
+    );
+    if (!verified.ok) {
+      console.warn(`Rejected webhook: ${verified.reason}`);
+      throw new Response("Unauthorized", { status: 401 });
+    }
+    return baseAuthenticate.webhook(patchEdgeUserAgent(verified.request));
+  }) as typeof baseAuthenticate.webhook,
   public: Object.fromEntries(
     Object.entries(baseAuthenticate.public).map(([key, fn]) => [
       key,

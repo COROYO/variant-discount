@@ -13,9 +13,11 @@ import {
   getRules,
   updateRule,
 } from "../models/rules.server";
+import { getCurrentPlan } from "../models/plan.server";
 
 export const loader = async ({ request }: LoaderFunctionArgs) => {
-  const { session } = await authenticate.admin(request);
+  const { admin, session } = await authenticate.admin(request);
+  const plan = await getCurrentPlan(admin);
   const rules = (await getRules(session.shop)).map((rule) => ({
     id: rule.id,
     title: rule.title,
@@ -31,7 +33,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
       .filter((image): image is string => Boolean(image))
       .slice(0, 6),
   }));
-  return { rules };
+  return { rules, plan };
 };
 
 export const action = async ({ request }: ActionFunctionArgs) => {
@@ -46,18 +48,24 @@ export const action = async ({ request }: ActionFunctionArgs) => {
   } else if (intent === "toggle") {
     const rule = await getRule(session.shop, id);
     if (rule) {
-      await updateRule(session.shop, id, {
-        title: rule.title,
-        status: rule.status === "active" ? "draft" : "active",
-        discountType: rule.discountType,
-        selectionMode: rule.selectionMode,
-        condition: rule.condition,
-        valueType: rule.valueType,
-        value: rule.value,
-        message: rule.message,
-        variants: rule.variants,
-        codes: rule.codes,
-      });
+      const plan = await getCurrentPlan(admin);
+      await updateRule(
+        session.shop,
+        id,
+        {
+          title: rule.title,
+          status: rule.status === "active" ? "draft" : "active",
+          discountType: rule.discountType,
+          selectionMode: rule.selectionMode,
+          condition: rule.condition,
+          valueType: rule.valueType,
+          value: rule.value,
+          message: rule.message,
+          variants: rule.variants,
+          codes: rule.codes,
+        },
+        plan,
+      );
       await applyRuleSync(admin, session.shop, id);
     }
   }
@@ -71,18 +79,43 @@ function formatValue(rule: { valueType: string; value: number }) {
 }
 
 export default function RulesIndex() {
-  const { rules } = useLoaderData<typeof loader>();
+  const { rules, plan } = useLoaderData<typeof loader>();
   const navigate = useNavigate();
   const fetcher = useFetcher();
 
   const submitIntent = (intent: string, id: string) =>
     fetcher.submit({ intent, id }, { method: "post" });
 
+  const atLimit = rules.length >= plan.limits.maxRules;
+
   return (
     <s-page heading="Variant-Rabatte">
-      <s-button slot="primary-action" onClick={() => navigate("/app/rules/new")}>
+      <s-button
+        slot="primary-action"
+        onClick={() => navigate("/app/rules/new")}
+        {...(atLimit ? { disabled: true } : {})}
+      >
         Neue Regel
       </s-button>
+
+      <s-section heading={`Plan: ${plan.name}`}>
+        <s-stack direction="block" gap="base">
+          <s-text color="subdued">
+            {rules.length} / {plan.limits.maxRules} Regeln verwendet
+            {plan.features.codeScheduling
+              ? " · Code-Planung aktiv"
+              : " · Code-Planung nur im Pro-Plan"}
+          </s-text>
+          {atLimit ? (
+            <s-banner tone="warning">
+              Plan-Limit erreicht.{" "}
+              {plan.id === "free"
+                ? "Upgrade auf Pro für bis zu 25 Regeln."
+                : "Bitte lösche eine bestehende Regel, um eine neue anzulegen."}
+            </s-banner>
+          ) : null}
+        </s-stack>
+      </s-section>
 
       <s-section heading="Regeln">
         {rules.length === 0 ? (
