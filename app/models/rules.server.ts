@@ -2,13 +2,15 @@ import { FieldValue, Timestamp } from "firebase-admin/firestore";
 import db from "../db.server";
 import { setJsonMetafield, type AdminGraphqlClient } from "./admin-graphql.server";
 import {
-  createCodeDiscount,
+  createCodeNode,
   deleteCodeDiscount,
   DISCOUNT_KEY,
   DISCOUNT_NAMESPACE,
   ensureDiscountId,
-  reconcileCodes,
+  fetchCodeUsage,
   setCodeDiscountActive,
+  updateCodeNodeSchedule,
+  type CodeUsageInfo,
 } from "./discount.server";
 
 export type RuleValueType = "percentage" | "fixedAmount";
@@ -29,6 +31,17 @@ export type RuleVariant = {
   image?: string; // thumbnail URL for display only (not sent to the function)
 };
 
+/** A single discount code. Each code is its own Shopify code-discount node, so
+ * it can be scheduled, activated, and counted independently. (A `type`, not
+ * `interface`, so it is assignable to React Router's JsonValue when submitted.) */
+export type RuleCode = {
+  code: string;
+  discountId: string | null; // its own code-discount node GID
+  startsAt: string | null; // ISO 8601, null = starts immediately
+  endsAt: string | null; // ISO 8601, null = no end (valid until deactivated)
+  active: boolean; // merchant on/off switch
+};
+
 export interface RuleData {
   id: string;
   shop: string;
@@ -41,7 +54,7 @@ export interface RuleData {
   value: number;
   message: string | null;
   variants: RuleVariant[];
-  codes: string[];
+  codes: RuleCode[];
   discountId: string | null;
   createdAt: Date;
   updatedAt: Date;
@@ -57,7 +70,7 @@ export interface RuleFormInput {
   value: number;
   message?: string | null;
   variants: RuleVariant[];
-  codes: string[];
+  codes: RuleCode[];
 }
 
 interface RuleDoc {
@@ -71,7 +84,7 @@ interface RuleDoc {
   value: number;
   message: string | null;
   variants: RuleVariant[];
-  codes: string[];
+  codes: unknown[];
   discountId: string | null;
   createdAt: Timestamp;
   updatedAt: Timestamp;
@@ -93,16 +106,38 @@ function normalizeVariants(variants: RuleVariant[] | undefined): RuleVariant[] {
     }));
 }
 
-/** Trim, uppercase, and de-duplicate codes (Shopify codes are case-insensitive). */
-function normalizeCodes(codes: string[]): string[] {
+/**
+ * Normalize codes into RuleCode objects, accepting the legacy `string[]` shape.
+ * Codes are trimmed, uppercased (Shopify codes are case-insensitive), and
+ * de-duplicated; entries with whitespace are dropped.
+ */
+function normalizeRuleCodes(raw: unknown): RuleCode[] {
+  if (!Array.isArray(raw)) return [];
   const seen = new Set<string>();
-  const result: string[] = [];
-  for (const raw of codes ?? []) {
-    const code = String(raw).trim().toUpperCase();
-    if (code && !seen.has(code)) {
-      seen.add(code);
-      result.push(code);
+  const result: RuleCode[] = [];
+  for (const entry of raw) {
+    let code = "";
+    let discountId: string | null = null;
+    let startsAt: string | null = null;
+    let endsAt: string | null = null;
+    let active = true;
+    if (typeof entry === "string") {
+      code = entry;
+    } else if (entry && typeof entry === "object") {
+      const obj = entry as Record<string, unknown>;
+      code = typeof obj.code === "string" ? obj.code : "";
+      discountId = typeof obj.discountId === "string" ? obj.discountId : null;
+      startsAt =
+        typeof obj.startsAt === "string" && obj.startsAt ? obj.startsAt : null;
+      endsAt = typeof obj.endsAt === "string" && obj.endsAt ? obj.endsAt : null;
+      active = obj.active !== false;
+    } else {
+      continue;
     }
+    code = code.trim().toUpperCase();
+    if (!code || /\s/.test(code) || seen.has(code)) continue;
+    seen.add(code);
+    result.push({ code, discountId, startsAt, endsAt, active });
   }
   return result;
 }
@@ -120,7 +155,7 @@ function docToRuleData(id: string, data: RuleDoc): RuleData {
     value: typeof data.value === "number" ? data.value : 0,
     message: data.message ?? null,
     variants: normalizeVariants(data.variants),
-    codes: Array.isArray(data.codes) ? data.codes.filter((c): c is string => typeof c === "string") : [],
+    codes: normalizeRuleCodes(data.codes),
     discountId: data.discountId ?? null,
     createdAt: data.createdAt ? data.createdAt.toDate() : new Date(0),
     updatedAt: data.updatedAt ? data.updatedAt.toDate() : new Date(0),
@@ -146,7 +181,7 @@ function sanitize(input: RuleFormInput) {
     value: Number.isFinite(input.value) ? Math.max(0, input.value) : 0,
     message: input.message?.trim() ? input.message.trim() : null,
     variants: normalizeVariants(input.variants ?? []),
-    codes: normalizeCodes(input.codes ?? []),
+    codes: normalizeRuleCodes(input.codes ?? []),
   };
 }
 
@@ -304,31 +339,58 @@ export async function syncCodeRule(
   shop: string,
   rule: RuleData,
 ): Promise<void> {
-  let discountId = rule.discountId;
-
-  if (!discountId) {
-    if (rule.codes.length === 0) return; // need at least one code to create it
-    discountId = await createCodeDiscount(admin, {
-      title: rule.title,
-      firstCode: rule.codes[0],
-    });
-    await rulesCollection().doc(rule.id).update({
-      discountId,
-      updatedAt: FieldValue.serverTimestamp(),
-    });
+  // Migrate away from the legacy single shared node (frees its codes for reuse
+  // as individual per-code nodes).
+  if (rule.discountId) {
+    await deleteCodeDiscount(admin, rule.discountId).catch(() => {});
   }
 
-  await reconcileCodes(admin, discountId, rule.codes);
-  await setJsonMetafield(admin, {
-    ownerId: discountId,
-    namespace: DISCOUNT_NAMESPACE,
-    key: DISCOUNT_KEY,
-    value: buildDiscountConfig([rule]),
-  });
+  const config = buildDiscountConfig([rule]);
+  const ruleLive = rule.status === "active" && ruleHasTargets(rule);
+  const updatedCodes: RuleCode[] = [];
 
-  const active =
-    rule.status === "active" && ruleHasTargets(rule) && rule.codes.length > 0;
-  await setCodeDiscountActive(admin, discountId, active);
+  for (const code of rule.codes) {
+    let discountId = code.discountId;
+    if (!discountId) {
+      discountId = await createCodeNode(admin, {
+        title: rule.title,
+        code: code.code,
+        startsAt: code.startsAt,
+        endsAt: code.endsAt,
+      });
+    } else {
+      await updateCodeNodeSchedule(admin, discountId, {
+        startsAt: code.startsAt,
+        endsAt: code.endsAt,
+      });
+    }
+
+    await setJsonMetafield(admin, {
+      ownerId: discountId,
+      namespace: DISCOUNT_NAMESPACE,
+      key: DISCOUNT_KEY,
+      value: config,
+    });
+
+    const shouldBeActive = ruleLive && code.active;
+    await setCodeDiscountActive(admin, discountId, shouldBeActive);
+    if (shouldBeActive) {
+      // Activating can reset the schedule to "now" — re-apply the intended dates.
+      await updateCodeNodeSchedule(admin, discountId, {
+        startsAt: code.startsAt,
+        endsAt: code.endsAt,
+      });
+    }
+
+    updatedCodes.push({ ...code, discountId });
+  }
+
+  // Persist newly created node ids and drop the legacy rule-level node id.
+  await rulesCollection().doc(rule.id).update({
+    codes: updatedCodes,
+    discountId: null,
+    updatedAt: FieldValue.serverTimestamp(),
+  });
 }
 
 /**
@@ -345,16 +407,36 @@ export async function applyRuleSync(
   if (rule) {
     if (rule.discountType === "code") {
       await syncCodeRule(admin, shop, rule);
-    } else if (rule.discountId) {
-      // Rule switched from code to automatic — remove its dedicated code node.
-      await deleteCodeDiscount(admin, rule.discountId).catch(() => {});
-      await rulesCollection().doc(rule.id).update({
-        discountId: null,
-        updatedAt: FieldValue.serverTimestamp(),
-      });
+    } else {
+      // Switched to automatic — remove any per-code nodes this rule owned.
+      await deleteAllCodeNodes(admin, rule);
+      const hadNodes =
+        Boolean(rule.discountId) || rule.codes.some((c) => c.discountId);
+      if (hadNodes) {
+        await rulesCollection().doc(rule.id).update({
+          codes: rule.codes.map((c) => ({ ...c, discountId: null })),
+          discountId: null,
+          updatedAt: FieldValue.serverTimestamp(),
+        });
+      }
     }
   }
   await syncAutomaticRules(admin, shop);
+}
+
+/** Delete every Shopify code node a rule owns (per-code nodes + legacy shared). */
+async function deleteAllCodeNodes(
+  admin: AdminGraphqlClient,
+  rule: RuleData,
+): Promise<void> {
+  if (rule.discountId) {
+    await deleteCodeDiscount(admin, rule.discountId).catch(() => {});
+  }
+  for (const code of rule.codes) {
+    if (code.discountId) {
+      await deleteCodeDiscount(admin, code.discountId).catch(() => {});
+    }
+  }
 }
 
 /** Delete a rule, clean up its code discount node, then refresh the automatic aggregate. */
@@ -365,10 +447,48 @@ export async function deleteRuleAndSync(
 ): Promise<void> {
   const rule = await getRule(shop, id);
   await deleteRule(shop, id);
-  if (rule?.discountType === "code" && rule.discountId) {
-    await deleteCodeDiscount(admin, rule.discountId).catch(() => {});
+  if (rule) {
+    await deleteAllCodeNodes(admin, rule);
   }
   await syncAutomaticRules(admin, shop);
+}
+
+/**
+ * Delete code nodes for codes that were removed from a rule while editing.
+ * Pass the rule's codes as they were *before* the update.
+ */
+export async function deleteRemovedCodeNodes(
+  admin: AdminGraphqlClient,
+  shop: string,
+  ruleId: string,
+  previousCodes: RuleCode[],
+): Promise<void> {
+  const current = await getRule(shop, ruleId);
+  const keep = new Set((current?.codes ?? []).map((c) => c.code));
+  for (const code of previousCodes) {
+    if (code.discountId && !keep.has(code.code)) {
+      await deleteCodeDiscount(admin, code.discountId).catch(() => {});
+    }
+  }
+}
+
+/** Live usage + status for a rule's codes, keyed by the code string. */
+export async function getRuleCodeUsage(
+  admin: AdminGraphqlClient,
+  rule: RuleData,
+): Promise<Record<string, CodeUsageInfo>> {
+  const withIds = rule.codes.filter((c) => c.discountId);
+  if (withIds.length === 0) return {};
+  const byId = await fetchCodeUsage(
+    admin,
+    withIds.map((c) => c.discountId as string),
+  );
+  const byCode: Record<string, CodeUsageInfo> = {};
+  for (const c of withIds) {
+    const info = byId[c.discountId as string];
+    if (info) byCode[c.code] = info;
+  }
+  return byCode;
 }
 
 /** Re-sync everything (automatic aggregate + every code rule). Used by webhooks. */

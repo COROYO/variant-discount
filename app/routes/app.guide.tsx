@@ -61,6 +61,12 @@ export default function Guide() {
             eingeben – mehrere Codes pro Regel sind möglich.
           </s-list-item>
           <s-list-item>
+            Jeder Code lässt sich einzeln aktivieren/deaktivieren und mit Start-
+            und Endzeit planen; im Regel-Editor siehst du außerdem, wie oft jeder
+            Code bereits eingelöst wurde. Ohne Zeitangabe gilt ein Code sofort und
+            unbegrenzt, bis er deaktiviert wird.
+          </s-list-item>
+          <s-list-item>
             Die automatische Bedingung erfasst alle Varianten ohne Vergleichspreis
             (bzw. Vergleichspreis = Preis) und schließt neue oder geänderte
             Produkte automatisch ein – ganz ohne manuelle Variantenpflege.

@@ -17,8 +17,11 @@ import { authenticate } from "../shopify.server";
 import {
   applyRuleSync,
   createRule,
+  deleteRemovedCodeNodes,
   getRule,
+  getRuleCodeUsage,
   updateRule,
+  type RuleCode,
   type RuleDiscountType,
   type RuleFormInput,
   type RuleSelectionMode,
@@ -26,10 +29,13 @@ import {
   type RuleValueType,
   type RuleVariant,
 } from "../models/rules.server";
+import type { CodeUsageInfo } from "../models/discount.server";
 
 export const loader = async ({ request, params }: LoaderFunctionArgs) => {
-  const { session } = await authenticate.admin(request);
+  const { admin, session } = await authenticate.admin(request);
   const id = params.id ?? "new";
+
+  const emptyUsage: Record<string, CodeUsageInfo> = {};
 
   if (id === "new") {
     return {
@@ -44,8 +50,9 @@ export const loader = async ({ request, params }: LoaderFunctionArgs) => {
         value: 10,
         message: "",
         variants: [] as RuleVariant[],
-        codes: [] as string[],
+        codes: [] as RuleCode[],
       },
+      usage: emptyUsage,
     };
   }
 
@@ -53,6 +60,8 @@ export const loader = async ({ request, params }: LoaderFunctionArgs) => {
   if (!rule) {
     throw new Response("Not Found", { status: 404 });
   }
+  // Live usage + status per code (best-effort; never blocks editing).
+  const usage = await getRuleCodeUsage(admin, rule).catch(() => emptyUsage);
   return {
     rule: {
       id: rule.id,
@@ -67,6 +76,7 @@ export const loader = async ({ request, params }: LoaderFunctionArgs) => {
       variants: rule.variants,
       codes: rule.codes,
     },
+    usage,
   };
 };
 
@@ -74,6 +84,11 @@ export const action = async ({ request, params }: ActionFunctionArgs) => {
   const { admin, session } = await authenticate.admin(request);
   const id = params.id ?? "new";
   const body = (await request.json()) as Partial<RuleFormInput>;
+
+  // Capture the codes as they were before saving so we can delete the discount
+  // nodes of any codes the merchant removed.
+  const previousCodes =
+    id === "new" ? [] : ((await getRule(session.shop, id))?.codes ?? []);
 
   const input: RuleFormInput = {
     title: typeof body.title === "string" ? body.title : "",
@@ -101,6 +116,7 @@ export const action = async ({ request, params }: ActionFunctionArgs) => {
   // deployed, or a code already in use) as a warning rather than losing it.
   try {
     await applyRuleSync(admin, session.shop, ruleId);
+    await deleteRemovedCodeNodes(admin, session.shop, ruleId, previousCodes);
   } catch (error) {
     return {
       ok: true as const,
@@ -115,8 +131,24 @@ function readValue(event: Event): string {
   return target?.value ?? "";
 }
 
+/** ISO datetime -> value for a <input type="datetime-local"> (local time). */
+function isoToLocalInput(iso: string | null): string {
+  if (!iso) return "";
+  const date = new Date(iso);
+  if (Number.isNaN(date.getTime())) return "";
+  const pad = (n: number) => String(n).padStart(2, "0");
+  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}T${pad(date.getHours())}:${pad(date.getMinutes())}`;
+}
+
+/** datetime-local value -> ISO string (or null when empty/invalid). */
+function localInputToIso(local: string): string | null {
+  if (!local) return null;
+  const date = new Date(local);
+  return Number.isNaN(date.getTime()) ? null : date.toISOString();
+}
+
 export default function RuleEditor() {
-  const { rule } = useLoaderData<typeof loader>();
+  const { rule, usage } = useLoaderData<typeof loader>();
   const actionData = useActionData<typeof action>();
   const navigate = useNavigate();
   const navigation = useNavigation();
@@ -136,7 +168,7 @@ export default function RuleEditor() {
   const [value, setValue] = useState(String(rule.value));
   const [message, setMessage] = useState(rule.message);
   const [variants, setVariants] = useState<RuleVariant[]>(rule.variants);
-  const [codes, setCodes] = useState<string[]>(rule.codes);
+  const [codes, setCodes] = useState<RuleCode[]>(rule.codes);
   const [codeInput, setCodeInput] = useState("");
   const [codeError, setCodeError] = useState("");
   const codeFieldRef = useRef<HTMLElement | null>(null);
@@ -206,11 +238,14 @@ export default function RuleEditor() {
       setCodeError("Codes dürfen keine Leerzeichen enthalten.");
       return;
     }
-    if (codes.includes(code)) {
+    if (codes.some((entry) => entry.code === code)) {
       setCodeError("Dieser Code wurde bereits hinzugefügt.");
       return;
     }
-    setCodes((prev) => [...prev, code]);
+    setCodes((prev) => [
+      ...prev,
+      { code, discountId: null, startsAt: null, endsAt: null, active: true },
+    ]);
     setCodeInput("");
     setCodeError("");
   };
@@ -218,23 +253,38 @@ export default function RuleEditor() {
   addCodeRef.current = addCode;
 
   const removeCode = (code: string) =>
-    setCodes((prev) => prev.filter((entry) => entry !== code));
+    setCodes((prev) => prev.filter((entry) => entry.code !== code));
+
+  const updateCodeAt = (index: number, patch: Partial<RuleCode>) =>
+    setCodes((prev) =>
+      prev.map((entry, i) => (i === index ? { ...entry, ...patch } : entry)),
+    );
+
+  const toggleCodeActive = (index: number) =>
+    setCodes((prev) =>
+      prev.map((entry, i) =>
+        i === index ? { ...entry, active: !entry.active } : entry,
+      ),
+    );
 
   const importCodesFromCsv = async (event: ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
     if (!file) return;
     const text = await file.text();
-    const seen = new Set(codes);
-    const toAdd = text
-      .split(/[\r\n,;\t]+/)
-      .map((entry) => entry.trim().toUpperCase())
-      .filter((entry) => {
-        if (entry.length === 0 || /\s/.test(entry) || seen.has(entry)) {
-          return false;
-        }
-        seen.add(entry);
-        return true;
+    const seen = new Set(codes.map((entry) => entry.code));
+    const toAdd: RuleCode[] = [];
+    for (const raw of text.split(/[\r\n,;\t]+/)) {
+      const code = raw.trim().toUpperCase();
+      if (!code || /\s/.test(code) || seen.has(code)) continue;
+      seen.add(code);
+      toAdd.push({
+        code,
+        discountId: null,
+        startsAt: null,
+        endsAt: null,
+        active: true,
       });
+    }
     if (toAdd.length > 0) {
       setCodes((prev) => [...prev, ...toAdd]);
     }
@@ -352,7 +402,10 @@ export default function RuleEditor() {
             <s-text color="subdued">
               Füge einen oder mehrere Codes hinzu, mit denen Kund:innen diesen
               Rabatt im Checkout einlösen können. Mit Enter bestätigen oder eine
-              CSV importieren (ein Code pro Zeile oder kommagetrennt).
+              CSV importieren (ein Code pro Zeile oder kommagetrennt). Jeder Code
+              kann einzeln deaktiviert und mit Start-/Endzeit versehen werden;
+              ohne Zeitangabe gilt er sofort und unbegrenzt, bis er deaktiviert
+              wird. Änderungen greifen nach dem Speichern.
             </s-text>
             <s-stack direction="inline" gap="base" alignItems="end">
               <s-text-field
@@ -388,30 +441,107 @@ export default function RuleEditor() {
               <s-text color="subdued">Noch keine Codes hinzugefügt.</s-text>
             ) : (
               <s-stack direction="block" gap="base">
-                {codes.map((code) => (
-                  <s-box
-                    key={code}
-                    padding="base"
-                    borderWidth="base"
-                    borderRadius="base"
-                  >
-                    <s-stack
-                      direction="inline"
-                      gap="base"
-                      alignItems="center"
-                      justifyContent="space-between"
+                {codes.map((codeEntry, index) => {
+                  const info = usage[codeEntry.code];
+                  return (
+                    <s-box
+                      key={codeEntry.code}
+                      padding="base"
+                      borderWidth="base"
+                      borderRadius="base"
                     >
-                      <s-text type="strong">{code}</s-text>
-                      <s-button
-                        variant="tertiary"
-                        tone="critical"
-                        onClick={() => removeCode(code)}
-                      >
-                        Entfernen
-                      </s-button>
-                    </s-stack>
-                  </s-box>
-                ))}
+                      <s-stack direction="block" gap="base">
+                        <s-stack
+                          direction="inline"
+                          gap="base"
+                          alignItems="center"
+                          justifyContent="space-between"
+                        >
+                          <s-stack
+                            direction="inline"
+                            gap="base"
+                            alignItems="center"
+                          >
+                            <s-text type="strong">{codeEntry.code}</s-text>
+                            <s-badge
+                              tone={codeEntry.active ? "success" : "neutral"}
+                            >
+                              {codeEntry.active ? "Aktiv" : "Deaktiviert"}
+                            </s-badge>
+                          </s-stack>
+                          <s-stack
+                            direction="inline"
+                            gap="base"
+                            alignItems="center"
+                          >
+                            <s-button
+                              variant="tertiary"
+                              onClick={() => toggleCodeActive(index)}
+                            >
+                              {codeEntry.active ? "Deaktivieren" : "Aktivieren"}
+                            </s-button>
+                            <s-button
+                              variant="tertiary"
+                              tone="critical"
+                              onClick={() => removeCode(codeEntry.code)}
+                            >
+                              Entfernen
+                            </s-button>
+                          </s-stack>
+                        </s-stack>
+
+                        <s-text color="subdued">
+                          {info
+                            ? `${info.usageCount}× verwendet`
+                            : "Noch nicht synchronisiert"}
+                        </s-text>
+
+                        <s-stack direction="inline" gap="base">
+                          <label
+                            style={{
+                              display: "flex",
+                              flexDirection: "column",
+                              fontSize: "0.85em",
+                            }}
+                          >
+                            Start (optional)
+                            <input
+                              type="datetime-local"
+                              value={isoToLocalInput(codeEntry.startsAt)}
+                              onChange={(event) =>
+                                updateCodeAt(index, {
+                                  startsAt: localInputToIso(
+                                    event.currentTarget.value,
+                                  ),
+                                })
+                              }
+                            />
+                          </label>
+                          <label
+                            style={{
+                              display: "flex",
+                              flexDirection: "column",
+                              fontSize: "0.85em",
+                            }}
+                          >
+                            Ende (optional)
+                            <input
+                              type="datetime-local"
+                              value={isoToLocalInput(codeEntry.endsAt)}
+                              onChange={(event) =>
+                                updateCodeAt(index, {
+                                  endsAt: localInputToIso(
+                                    event.currentTarget.value,
+                                  ),
+                                })
+                              }
+                            />
+                          </label>
+                        </s-stack>
+                      </s-stack>
+                    </s-box>
+                  );
+                })}
               </s-stack>
             )}
           </s-stack>

@@ -134,15 +134,21 @@ export async function deleteShopRecord(shop: string): Promise<void> {
   await shopsCollection().doc(shop).delete().catch(() => {});
 }
 
-// ── Code discounts ──────────────────────────────────────────────────────────
-// Each code-based rule owns its own code discount node. The same Function reads
-// that node's $app:rules/config metafield, so one variant of a product can be
-// discounted via a code while its siblings are not.
+// ── Code discounts (one node per code) ──────────────────────────────────────
+// Each code gets its OWN code-discount node so it can carry an individual
+// schedule (startsAt/endsAt), be activated/deactivated on its own, and report
+// its own usage count. Every code of a rule shares the same function + config
+// metafield (the rule's discount logic).
 
-/** Create a code app discount node (seeded with its first code) and return its GID. */
-export async function createCodeDiscount(
+/** Create a code-discount node for a single code and return its GID. */
+export async function createCodeNode(
   admin: AdminGraphqlClient,
-  options: { title: string; firstCode: string },
+  options: {
+    title: string;
+    code: string;
+    startsAt: string | null;
+    endsAt: string | null;
+  },
 ): Promise<string> {
   const functionId = await resolveFunctionId(admin);
   if (!functionId) {
@@ -169,8 +175,9 @@ export async function createCodeDiscount(
       discount: {
         title: options.title,
         functionId,
-        code: options.firstCode,
-        startsAt: new Date().toISOString(),
+        code: options.code,
+        startsAt: options.startsAt ?? new Date().toISOString(),
+        endsAt: options.endsAt, // null => no end date (valid until deactivated)
         discountClasses: ["PRODUCT"],
         combinesWith: {
           orderDiscounts: true,
@@ -194,87 +201,41 @@ export async function createCodeDiscount(
   return discountId;
 }
 
-async function fetchRedeemCodes(
+/** Update a code node's schedule (start/end). Pass null for endsAt to clear it. */
+export async function updateCodeNodeSchedule(
   admin: AdminGraphqlClient,
   discountId: string,
-): Promise<Array<{ id: string; code: string }>> {
-  const data = await adminGraphql<{
-    codeDiscountNode: {
-      codeDiscount: { codes?: { nodes: Array<{ id: string; code: string }> } };
-    } | null;
+  schedule: { startsAt: string | null; endsAt: string | null },
+): Promise<void> {
+  const result = await adminGraphql<{
+    discountCodeAppUpdate: {
+      userErrors: Array<{ field: string[] | null; message: string }>;
+    };
   }>(
     admin,
     `#graphql
-      query CodeDiscountCodes($id: ID!) {
-        codeDiscountNode(id: $id) {
-          codeDiscount {
-            __typename
-            ... on DiscountCodeApp {
-              codes(first: 100) { nodes { id code } }
-            }
-          }
+      mutation UpdateCodeDiscount($id: ID!, $discount: DiscountCodeAppInput!) {
+        discountCodeAppUpdate(id: $id, codeAppDiscount: $discount) {
+          userErrors { field message }
         }
       }`,
-    { id: discountId },
+    {
+      id: discountId,
+      discount: {
+        startsAt: schedule.startsAt ?? new Date().toISOString(),
+        endsAt: schedule.endsAt, // null => clear end date
+      },
+    },
   );
-  return data.codeDiscountNode?.codeDiscount?.codes?.nodes ?? [];
-}
-
-/** Make the discount node's redeem codes match `desiredCodes` exactly. */
-export async function reconcileCodes(
-  admin: AdminGraphqlClient,
-  discountId: string,
-  desiredCodes: string[],
-): Promise<void> {
-  const existing = await fetchRedeemCodes(admin, discountId);
-  const existingCodes = new Set(existing.map((entry) => entry.code));
-  const desired = new Set(desiredCodes);
-
-  const toAdd = desiredCodes.filter((code) => !existingCodes.has(code));
-  const toRemoveIds = existing
-    .filter((entry) => !desired.has(entry.code))
-    .map((entry) => entry.id);
-
-  if (toAdd.length > 0) {
-    const result = await adminGraphql<{
-      discountRedeemCodeBulkAdd: {
-        userErrors: Array<{ field: string[] | null; message: string }>;
-      };
-    }>(
-      admin,
-      `#graphql
-        mutation AddCodes($discountId: ID!, $codes: [DiscountRedeemCodeInput!]!) {
-          discountRedeemCodeBulkAdd(discountId: $discountId, codes: $codes) {
-            userErrors { field message }
-          }
-        }`,
-      { discountId, codes: toAdd.map((code) => ({ code })) },
-    );
-    const addErrors = result.discountRedeemCodeBulkAdd.userErrors;
-    if (addErrors.length) {
-      throw new Error(
-        `Codes konnten nicht hinzugefügt werden (evtl. bereits vergeben): ${addErrors
-          .map((error) => error.message)
-          .join("; ")}`,
-      );
-    }
-  }
-
-  if (toRemoveIds.length > 0) {
-    await adminGraphql(
-      admin,
-      `#graphql
-        mutation DeleteCodes($discountId: ID!, $ids: [ID!]) {
-          discountCodeRedeemCodeBulkDelete(discountId: $discountId, ids: $ids) {
-            userErrors { field message }
-          }
-        }`,
-      { discountId, ids: toRemoveIds },
+  const errors = result.discountCodeAppUpdate.userErrors;
+  if (errors.length) {
+    throw new Error(
+      `discountCodeAppUpdate: ${errors.map((error) => error.message).join("; ")}`,
     );
   }
 }
 
-/** Activate or deactivate a code discount node. */
+/** Activate or deactivate a single code node. */
 export async function setCodeDiscountActive(
   admin: AdminGraphqlClient,
   discountId: string,
@@ -292,7 +253,7 @@ export async function setCodeDiscountActive(
   await adminGraphql(admin, mutation, { id: discountId });
 }
 
-/** Permanently delete a code discount node (rule removed or switched to automatic). */
+/** Permanently delete a code node (code removed, or rule deleted / switched). */
 export async function deleteCodeDiscount(
   admin: AdminGraphqlClient,
   discountId: string,
@@ -305,4 +266,67 @@ export async function deleteCodeDiscount(
       }`,
     { id: discountId },
   );
+}
+
+export interface CodeUsageInfo {
+  usageCount: number;
+  status: string; // ACTIVE | SCHEDULED | EXPIRED
+  startsAt: string | null;
+  endsAt: string | null;
+}
+
+/** Fetch live usage + status for code nodes, keyed by discount node GID. */
+export async function fetchCodeUsage(
+  admin: AdminGraphqlClient,
+  discountIds: string[],
+): Promise<Record<string, CodeUsageInfo>> {
+  const ids = discountIds.filter((id): id is string => Boolean(id));
+  const result: Record<string, CodeUsageInfo> = {};
+  for (let i = 0; i < ids.length; i += 100) {
+    const chunk = ids.slice(i, i + 100);
+    const data = await adminGraphql<{
+      nodes: Array<{
+        id: string;
+        __typename: string;
+        codeDiscount?: {
+          __typename: string;
+          status?: string;
+          startsAt?: string | null;
+          endsAt?: string | null;
+          asyncUsageCount?: number;
+        };
+      } | null>;
+    }>(
+      admin,
+      `#graphql
+        query CodeDiscountStatuses($ids: [ID!]!) {
+          nodes(ids: $ids) {
+            id
+            __typename
+            ... on DiscountCodeNode {
+              codeDiscount {
+                __typename
+                ... on DiscountCodeApp {
+                  status
+                  startsAt
+                  endsAt
+                  asyncUsageCount
+                }
+              }
+            }
+          }
+        }`,
+      { ids: chunk },
+    );
+    for (const node of data.nodes) {
+      if (!node || !node.codeDiscount) continue;
+      result[node.id] = {
+        usageCount: node.codeDiscount.asyncUsageCount ?? 0,
+        status: node.codeDiscount.status ?? "",
+        startsAt: node.codeDiscount.startsAt ?? null,
+        endsAt: node.codeDiscount.endsAt ?? null,
+      };
+    }
+  }
+  return result;
 }
