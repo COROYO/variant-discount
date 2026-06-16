@@ -3,7 +3,7 @@ import type {
   HeadersFunction,
   LoaderFunctionArgs,
 } from "react-router";
-import { useFetcher, useLoaderData, useNavigate } from "react-router";
+import { useFetcher, useLoaderData } from "react-router";
 import { boundary } from "@shopify/shopify-app-react-router/server";
 import { authenticate } from "../shopify.server";
 import {
@@ -80,7 +80,6 @@ function formatValue(rule: { valueType: string; value: number }) {
 
 export default function RulesIndex() {
   const { rules, plan } = useLoaderData<typeof loader>();
-  const navigate = useNavigate();
   const fetcher = useFetcher();
 
   const submitIntent = (intent: string, id: string) =>
@@ -92,8 +91,7 @@ export default function RulesIndex() {
     <s-page heading="Variant-Rabatte">
       <s-button
         slot="primary-action"
-        onClick={() => navigate("/app/rules/new")}
-        {...(atLimit ? { disabled: true } : {})}
+        {...(atLimit ? { disabled: true } : { href: "/app/rules/new" })}
       >
         Neue Regel
       </s-button>
@@ -126,9 +124,7 @@ export default function RulesIndex() {
               100&nbsp;g-Variante desselben Produkts.
             </s-paragraph>
             <s-stack direction="inline" gap="base">
-              <s-button onClick={() => navigate("/app/rules/new")}>
-                Erste Regel anlegen
-              </s-button>
+              <s-button href="/app/rules/new">Erste Regel anlegen</s-button>
             </s-stack>
           </s-stack>
         ) : (
@@ -184,10 +180,7 @@ export default function RulesIndex() {
                   </s-stack>
 
                   <s-stack direction="inline" gap="base" alignItems="center">
-                    <s-button
-                      variant="primary"
-                      onClick={() => navigate(`/app/rules/${rule.id}`)}
-                    >
+                    <s-button variant="primary" href={`/app/rules/${rule.id}`}>
                       Bearbeiten
                     </s-button>
                     <s-button onClick={() => submitIntent("toggle", rule.id)}>

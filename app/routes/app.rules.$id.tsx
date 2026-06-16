@@ -654,7 +654,7 @@ export default function RuleEditor() {
       )}
 
       <s-section>
-        <s-button variant="tertiary" onClick={() => navigate("/app")}>
+        <s-button variant="tertiary" href="/app">
           Abbrechen
         </s-button>
       </s-section>
