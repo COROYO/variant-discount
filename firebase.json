@@ -9,8 +9,24 @@
       "firebase-debug.*.log",
       ".react-router",
       ".shopify",
+      ".shopify.lock",
+      ".cursor",
+      ".gemini",
+      ".vscode",
+      ".idea",
+      ".mcp.json",
+      ".shadowenv.d",
+      ".editorconfig",
+      ".eslintignore",
+      ".eslintrc.cjs",
+      ".prettierignore",
+      ".prettierrc*",
+      "CHANGELOG.md",
+      "README.md",
       "build",
-      "extensions"
+      "public/_dev",
+      "extensions",
+      "pnpm-workspace.yaml"
     ]
   },
   "firestore": {
