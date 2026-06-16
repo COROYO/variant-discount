@@ -2,5 +2,8 @@ packages:
   - 'extensions/*'
 allowBuilds:
   '@parcel/watcher': true
+  '@firebase/util': true
+  core-js: true
   esbuild: true
+  protobufjs: true
   unrs-resolver: true
