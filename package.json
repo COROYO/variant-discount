@@ -1,8 +1,10 @@
 {
   "name": "variant-discounts",
   "private": true,
+  "packageManager": "pnpm@10.33.0",
   "scripts": {
     "build": "react-router build",
+    "apphosting:build": "react-router build",
     "dev": "shopify app dev",
     "config:link": "shopify app config link",
     "generate": "shopify app generate",
