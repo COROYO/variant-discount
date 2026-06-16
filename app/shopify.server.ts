@@ -42,11 +42,34 @@ function patchEdgeUserAgent(request: Request): Request {
   if (ua && !/^Google(bot)?$/i.test(ua)) return request;
 
   const url = new URL(request.url);
+  const referer = request.headers.get("referer") ?? "";
+
+  // Client-side navigations in React Router (e.g. `/app/rules/new.data`) don't
+  // carry Shopify query params on the request URL itself, but the referer is
+  // the embedded app page, which still has `id_token` / `shop` / `hmac`.
+  let refererCarriesShopifyParams = false;
+  try {
+    if (referer) {
+      const refererUrl = new URL(referer);
+      refererCarriesShopifyParams =
+        refererUrl.searchParams.has("id_token") ||
+        refererUrl.searchParams.has("hmac") ||
+        refererUrl.searchParams.has("shop");
+    }
+  } catch {
+    // Ignore malformed referer header.
+  }
+
   const looksLikeShopify =
     url.searchParams.has("id_token") ||
     url.searchParams.has("hmac") ||
     url.searchParams.has("shop") ||
-    (request.headers.get("referer") ?? "").includes("admin.shopify.com");
+    referer.includes("admin.shopify.com") ||
+    refererCarriesShopifyParams ||
+    // `sec-fetch-site: same-origin` is set by every modern browser on in-page
+    // fetches/navigations and never by crawlers, so it's a reliable browser
+    // signal even after the edge has wiped the user-agent.
+    request.headers.get("sec-fetch-site") === "same-origin";
   if (!looksLikeShopify) return request;
 
   const headers = new Headers(request.headers);
