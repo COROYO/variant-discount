@@ -1,0 +1,34 @@
+{
+  "cart": {
+    "lines": [
+      {
+        "id": "gid://shopify/CartLine/1",
+        "cost": {
+          "amountPerQuantity": { "amount": "10.00" },
+          "compareAtAmountPerQuantity": null
+        },
+        "merchandise": {
+          "__typename": "ProductVariant",
+          "id": "gid://shopify/ProductVariant/not-on-sale"
+        }
+      },
+      {
+        "id": "gid://shopify/CartLine/2",
+        "cost": {
+          "amountPerQuantity": { "amount": "8.00" },
+          "compareAtAmountPerQuantity": { "amount": "12.00" }
+        },
+        "merchandise": {
+          "__typename": "ProductVariant",
+          "id": "gid://shopify/ProductVariant/on-sale"
+        }
+      }
+    ]
+  },
+  "discount": {
+    "discountClasses": ["PRODUCT"],
+    "metafield": {
+      "value": "{\"rules\":[{\"id\":\"c1\",\"status\":\"active\",\"selectionMode\":\"condition\",\"condition\":\"not_on_sale\",\"valueType\":\"percentage\",\"value\":15,\"message\":\"-15% (nicht reduziert)\"}]}"
+    }
+  }
+}

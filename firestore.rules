@@ -1,0 +1,13 @@
+rules_version = '2';
+
+// All Firestore access in this app is performed server-side via the Firebase
+// Admin SDK (App Hosting service account), which bypasses these rules. We
+// therefore deny all client-side access by default. Do not relax this without
+// a strict reason — Shopify shop data must never be reachable from the browser.
+service cloud.firestore {
+  match /databases/{database}/documents {
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}

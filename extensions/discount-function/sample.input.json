@@ -1,0 +1,28 @@
+{
+  "cart": {
+    "lines": [
+      {
+        "id": "gid://shopify/CartLine/1",
+        "cost": { "amountPerQuantity": { "amount": "10.00" } },
+        "merchandise": {
+          "__typename": "ProductVariant",
+          "id": "gid://shopify/ProductVariant/50g"
+        }
+      },
+      {
+        "id": "gid://shopify/CartLine/2",
+        "cost": { "amountPerQuantity": { "amount": "18.00" } },
+        "merchandise": {
+          "__typename": "ProductVariant",
+          "id": "gid://shopify/ProductVariant/100g"
+        }
+      }
+    ]
+  },
+  "discount": {
+    "discountClasses": ["PRODUCT"],
+    "metafield": {
+      "value": "{\"rules\":[{\"id\":\"r1\",\"status\":\"active\",\"valueType\":\"percentage\",\"value\":20,\"message\":\"-20% 50g\",\"variantIds\":[\"gid://shopify/ProductVariant/50g\"]}]}"
+    }
+  }
+}
