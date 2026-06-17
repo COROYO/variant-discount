@@ -14,6 +14,8 @@ import {
   updateRule,
 } from "../models/rules.server";
 import { getCurrentPlan } from "../models/plan.server";
+import { AppActionButton } from "../components/app-action-button";
+import { AppNavigateButton } from "../components/app-navigate-button";
 
 export const loader = async ({ request }: LoaderFunctionArgs) => {
   const { admin, session } = await authenticate.admin(request);
@@ -89,12 +91,15 @@ export default function RulesIndex() {
 
   return (
     <s-page heading="Variant-Rabatte">
-      <s-button
-        slot="primary-action"
-        {...(atLimit ? { disabled: true } : { href: "/app/rules/new" })}
-      >
-        Neue Regel
-      </s-button>
+      {!atLimit ? (
+        <AppNavigateButton slot="primary-action" to="/app/rules/new">
+          Neue Regel
+        </AppNavigateButton>
+      ) : (
+        <s-button slot="primary-action" disabled>
+          Neue Regel
+        </s-button>
+      )}
 
       <s-section heading={`Plan: ${plan.name}`}>
         <s-stack direction="block" gap="base">
@@ -124,7 +129,9 @@ export default function RulesIndex() {
               100&nbsp;g-Variante desselben Produkts.
             </s-paragraph>
             <s-stack direction="inline" gap="base">
-              <s-button href="/app/rules/new">Erste Regel anlegen</s-button>
+              <AppNavigateButton to="/app/rules/new">
+                Erste Regel anlegen
+              </AppNavigateButton>
             </s-stack>
           </s-stack>
         ) : (
@@ -180,18 +187,18 @@ export default function RulesIndex() {
                   </s-stack>
 
                   <s-stack direction="inline" gap="base" alignItems="center">
-                    <s-button variant="primary" href={`/app/rules/${rule.id}`}>
+                    <AppNavigateButton variant="primary" to={`/app/rules/${rule.id}`}>
                       Bearbeiten
-                    </s-button>
-                    <s-button onClick={() => submitIntent("toggle", rule.id)}>
+                    </AppNavigateButton>
+                    <AppActionButton onAction={() => submitIntent("toggle", rule.id)}>
                       {rule.status === "active" ? "Deaktivieren" : "Aktivieren"}
-                    </s-button>
-                    <s-button
+                    </AppActionButton>
+                    <AppActionButton
                       tone="critical"
-                      onClick={() => submitIntent("delete", rule.id)}
+                      onAction={() => submitIntent("delete", rule.id)}
                     >
                       Löschen
-                    </s-button>
+                    </AppActionButton>
                   </s-stack>
                 </s-stack>
               </s-box>

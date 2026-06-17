@@ -1,11 +1,11 @@
 import type { HeadersFunction, LoaderFunctionArgs } from "react-router";
-import { Link, Outlet, useLoaderData, useRouteError } from "react-router";
+import { Outlet, useLoaderData, useRouteError } from "react-router";
 import { boundary } from "@shopify/shopify-app-react-router/server";
 import { AppProvider } from "@shopify/shopify-app-react-router/react";
-import { NavMenu } from "@shopify/app-bridge-react";
 
 import { authenticate } from "../shopify.server";
 import { AppFooter } from "../components/app-footer";
+import { useShopifyNavigate } from "../hooks/use-shopify-navigate";
 
 export const loader = async ({ request }: LoaderFunctionArgs) => {
   await authenticate.admin(request);
@@ -14,23 +14,28 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
   return { apiKey: process.env.SHOPIFY_API_KEY || "" };
 };
 
+function AppLayout() {
+  useShopifyNavigate();
+
+  return (
+    <>
+      <s-app-nav>
+        <s-link href="/app">Rabatt-Regeln</s-link>
+        <s-link href="/app/guide">Anleitung</s-link>
+        <s-link href="/app/support">Support</s-link>
+      </s-app-nav>
+      <Outlet />
+      <AppFooter />
+    </>
+  );
+}
+
 export default function App() {
   const { apiKey } = useLoaderData<typeof loader>();
 
   return (
     <AppProvider embedded apiKey={apiKey}>
-      {/* NavMenu wraps App Bridge's <ui-nav-menu>. The first child MUST set
-         rel="home" so App Bridge knows which route is the app root; otherwise
-         the entire menu fails to render in the Shopify admin sidebar. */}
-      <NavMenu>
-        <Link to="/app" rel="home">
-          Rabatt-Regeln
-        </Link>
-        <Link to="/app/guide">Anleitung</Link>
-        <Link to="/app/support">Support</Link>
-      </NavMenu>
-      <Outlet />
-      <AppFooter />
+      <AppLayout />
     </AppProvider>
   );
 }

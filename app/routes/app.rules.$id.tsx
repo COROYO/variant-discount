@@ -32,6 +32,8 @@ import {
 } from "../models/rules.server";
 import type { CodeUsageInfo } from "../models/discount.server";
 import { getCurrentPlan } from "../models/plan.server";
+import { AppActionButton } from "../components/app-action-button";
+import { AppNavigateButton } from "../components/app-navigate-button";
 
 export const loader = async ({ request, params }: LoaderFunctionArgs) => {
   const { admin, session } = await authenticate.admin(request);
@@ -333,13 +335,13 @@ export default function RuleEditor() {
 
   return (
     <s-page heading={rule.id === "new" ? "Neue Regel" : "Regel bearbeiten"}>
-      <s-button
+      <AppActionButton
         slot="primary-action"
-        onClick={save}
+        onAction={save}
         {...(isSaving ? { loading: true } : {})}
       >
         Speichern
-      </s-button>
+      </AppActionButton>
 
       <s-section heading="Einstellungen">
         <s-stack direction="block" gap="base">
@@ -449,13 +451,13 @@ export default function RuleEditor() {
                   if (codeError) setCodeError("");
                 }}
               />
-              <s-button onClick={addCode}>Hinzufügen</s-button>
-              <s-button
+              <AppActionButton onAction={addCode}>Hinzufügen</AppActionButton>
+              <AppActionButton
                 variant="tertiary"
-                onClick={() => fileInputRef.current?.click()}
+                onAction={() => fileInputRef.current?.click()}
               >
                 CSV importieren
-              </s-button>
+              </AppActionButton>
             </s-stack>
             <input
               ref={fileInputRef}
@@ -502,19 +504,19 @@ export default function RuleEditor() {
                             gap="base"
                             alignItems="center"
                           >
-                            <s-button
+                            <AppActionButton
                               variant="tertiary"
-                              onClick={() => toggleCodeActive(index)}
+                              onAction={() => toggleCodeActive(index)}
                             >
                               {codeEntry.active ? "Deaktivieren" : "Aktivieren"}
-                            </s-button>
-                            <s-button
+                            </AppActionButton>
+                            <AppActionButton
                               variant="tertiary"
                               tone="critical"
-                              onClick={() => removeCode(codeEntry.code)}
+                              onAction={() => removeCode(codeEntry.code)}
                             >
                               Entfernen
-                            </s-button>
+                            </AppActionButton>
                           </s-stack>
                         </s-stack>
 
@@ -607,7 +609,9 @@ export default function RuleEditor() {
               Andere Varianten desselben Produkts bleiben unberührt.
             </s-text>
             <s-stack direction="inline" gap="base">
-              <s-button onClick={pickVariants}>Varianten auswählen</s-button>
+              <AppActionButton onAction={pickVariants}>
+                Varianten auswählen
+              </AppActionButton>
             </s-stack>
 
             {variants.length === 0 ? (
@@ -637,13 +641,13 @@ export default function RuleEditor() {
                         ) : null}
                         <s-text>{variant.title || variant.id}</s-text>
                       </s-stack>
-                      <s-button
+                      <AppActionButton
                         variant="tertiary"
                         tone="critical"
-                        onClick={() => removeVariant(variant.id)}
+                        onAction={() => removeVariant(variant.id)}
                       >
                         Entfernen
-                      </s-button>
+                      </AppActionButton>
                     </s-stack>
                   </s-box>
                 ))}
@@ -654,9 +658,9 @@ export default function RuleEditor() {
       )}
 
       <s-section>
-        <s-button variant="tertiary" href="/app">
+        <AppNavigateButton variant="tertiary" to="/app">
           Abbrechen
-        </s-button>
+        </AppNavigateButton>
       </s-section>
     </s-page>
   );
