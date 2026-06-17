@@ -1,13 +1,18 @@
-import type { HeadersFunction, LoaderFunctionArgs } from "react-router";
-import { useLoaderData } from "react-router";
+import type {
+  ActionFunctionArgs,
+  HeadersFunction,
+  LoaderFunctionArgs,
+} from "react-router";
+import { useLoaderData, useNavigation, useSubmit } from "react-router";
 import { boundary } from "@shopify/shopify-app-react-router/server";
 import { authenticate, BILLING_TEST } from "../shopify.server";
+import { getShopifyAppPricingPlansUrl } from "../models/billing.server";
 import {
   PLANS,
   planFromSubscriptionName,
   type PlanId,
 } from "../config/plans.shared";
-import { AppNavigateButton } from "../components/app-navigate-button";
+import { AppActionButton } from "../components/app-action-button";
 import styles from "../styles/plans.module.css";
 
 export const loader = async ({ request }: LoaderFunctionArgs) => {
@@ -24,16 +29,39 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
   return { currentPlanId, isTest: BILLING_TEST };
 };
 
+export const action = async ({ request }: ActionFunctionArgs) => {
+  const { session, redirect } = await authenticate.admin(request);
+  const formData = await request.formData();
+
+  if (formData.get("_action") === "subscribe") {
+    // Hand off to Shopify's hosted plan-selection page. The Admin `redirect`
+    // helper with target "_top" breaks out of the embedded iframe (unlike
+    // billing.request, which was the source of the earlier error). Shopify
+    // handles selection, approval, upgrade and cancellation there.
+    throw redirect(getShopifyAppPricingPlansUrl(session.shop), {
+      target: "_top",
+    });
+  }
+
+  return null;
+};
+
 export default function PlanPage() {
   const { currentPlanId, isTest } = useLoaderData<typeof loader>();
+  const submit = useSubmit();
+  const navigation = useNavigation();
+  const busy = navigation.state === "submitting";
+
+  const openPlans = () => submit({ _action: "subscribe" }, { method: "post" });
   const isPaid = currentPlanId === "pro" || currentPlanId === "plus";
 
   return (
     <s-page heading="Plan & Preise">
       <s-section>
         <s-paragraph>
-          Wähle den Plan, der zu deinem Shop passt. Upgrade und Downgrade sind
-          jederzeit möglich – die Abrechnung läuft sicher über Shopify.
+          Wähle den Plan, der zu deinem Shop passt. Plan-Auswahl und Abrechnung
+          laufen sicher über Shopify – Upgrade und Downgrade sind jederzeit
+          möglich.
         </s-paragraph>
         {currentPlanId === "plus" ? (
           <s-paragraph>
@@ -47,7 +75,7 @@ export default function PlanPage() {
           <s-paragraph>
             <s-badge tone="info">Testmodus</s-badge>{" "}
             <s-text color="subdued">
-              In der Entwicklung werden keine echten Gebühren berechnet.
+              In der Entwicklung fallen keine echten Gebühren an.
             </s-text>
           </s-paragraph>
         ) : null}
@@ -73,9 +101,12 @@ export default function PlanPage() {
             {currentPlanId === "free" ? (
               <s-text color="subdued">Dein aktiver Plan</s-text>
             ) : (
-              <AppNavigateButton to="/app/plan/cancel">
-                Auf Free wechseln
-              </AppNavigateButton>
+              <AppActionButton
+                onAction={openPlans}
+                {...(busy ? { loading: true } : {})}
+              >
+                Plan ändern
+              </AppActionButton>
             )}
           </div>
         </div>
@@ -95,20 +126,22 @@ export default function PlanPage() {
             <li>Alle Funktionen des Free-Plans</li>
           </ul>
           <div className={styles.actions}>
-            {currentPlanId === "pro" ? (
-              <AppNavigateButton
-                to="/app/plan/cancel"
+            {isPaid ? (
+              <AppActionButton
                 variant="tertiary"
-                tone="critical"
+                onAction={openPlans}
+                {...(busy ? { loading: true } : {})}
               >
-                Kündigen (Downgrade auf Free)
-              </AppNavigateButton>
-            ) : currentPlanId === "plus" ? (
-              <s-text color="subdued">Im internen Plan enthalten</s-text>
+                Plan verwalten
+              </AppActionButton>
             ) : (
-              <AppNavigateButton to="/app/plan/subscribe" variant="primary">
+              <AppActionButton
+                variant="primary"
+                onAction={openPlans}
+                {...(busy ? { loading: true } : {})}
+              >
                 Auf Pro upgraden – ${PLANS.pro.priceMonthly}/Monat
-              </AppNavigateButton>
+              </AppActionButton>
             )}
           </div>
         </div>
