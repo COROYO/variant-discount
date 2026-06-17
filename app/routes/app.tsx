@@ -22,6 +22,7 @@ function AppLayout() {
       <s-app-nav>
         <s-link href="/app">Rabatt-Regeln</s-link>
         <s-link href="/app/guide">Anleitung</s-link>
+        <s-link href="/app/plan">Plan</s-link>
         <s-link href="/app/support">Support</s-link>
       </s-app-nav>
       <Outlet />
