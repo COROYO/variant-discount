@@ -2,20 +2,11 @@ import "@shopify/shopify-app-react-router/adapters/node";
 import {
   ApiVersion,
   AppDistribution,
-  BillingInterval,
   shopifyApp,
 } from "@shopify/shopify-app-react-router/server";
 import db from "./db.server";
 import { FirestoreSessionStorage } from "./firestore-session-storage.server";
 import { verifyWebhookHmacAndRebuild } from "./utils/verify-webhook-hmac.server";
-import { PLANS } from "./config/plans.shared";
-
-/** Billing plan key. Must equal the Shopify subscription name that
- * `planFromSubscriptionName()` maps to the "pro" plan (PLANS.pro.name). */
-export const PRO_PLAN = "Pro" as const;
-
-/** Use Shopify test charges outside production so dev installs aren't billed. */
-export const BILLING_TEST = process.env.NODE_ENV !== "production";
 
 const shopify = shopifyApp({
   apiKey: process.env.SHOPIFY_API_KEY,
@@ -26,17 +17,6 @@ const shopify = shopifyApp({
   authPathPrefix: "/auth",
   sessionStorage: new FirestoreSessionStorage(db),
   distribution: AppDistribution.AppStore,
-  billing: {
-    [PRO_PLAN]: {
-      lineItems: [
-        {
-          amount: PLANS.pro.priceMonthly,
-          currencyCode: "USD",
-          interval: BillingInterval.Every30Days,
-        },
-      ],
-    },
-  },
   future: {
     expiringOfflineAccessTokens: true,
   },

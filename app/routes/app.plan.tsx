@@ -1,165 +1,38 @@
-import type {
-  ActionFunctionArgs,
-  HeadersFunction,
-  LoaderFunctionArgs,
-} from "react-router";
-import { useLoaderData, useNavigation, useSubmit } from "react-router";
+import type { HeadersFunction, LoaderFunctionArgs } from "react-router";
 import { boundary } from "@shopify/shopify-app-react-router/server";
-import { authenticate, BILLING_TEST, PRO_PLAN } from "../shopify.server";
-import {
-  PLANS,
-  planFromSubscriptionName,
-  type PlanId,
-} from "../config/plans.shared";
-import { AppActionButton } from "../components/app-action-button";
-import styles from "../styles/plans.module.css";
+import { authenticate } from "../shopify.server";
 
+/**
+ * Shopify App Pricing (formerly Managed Pricing): Shopify hosts the native
+ * plan-selection page. We send the merchant there, escaping the embedded iframe
+ * via the Admin `redirect` helper (target "_top"). Plans, prices and the welcome
+ * link are configured in the Partner Dashboard, not in code.
+ *
+ * The store handle is derived from the shop domain; the app handle defaults to
+ * the app name and can be overridden with SHOPIFY_APP_HANDLE if it differs in
+ * the Partner Dashboard.
+ */
 export const loader = async ({ request }: LoaderFunctionArgs) => {
-  const { billing } = await authenticate.admin(request);
+  const { redirect, session } = await authenticate.admin(request);
 
-  let currentPlanId: PlanId = "free";
-  try {
-    const { appSubscriptions } = await billing.check();
-    currentPlanId = planFromSubscriptionName(appSubscriptions?.[0]?.name ?? null);
-  } catch {
-    currentPlanId = "free";
-  }
+  const appHandle = process.env.SHOPIFY_APP_HANDLE || "variant-discounts";
+  const storeHandle = session.shop.replace(/\.myshopify\.com$/, "");
 
-  return { currentPlanId, isTest: BILLING_TEST };
+  return redirect(
+    `https://admin.shopify.com/store/${storeHandle}/charges/${appHandle}/pricing_plans`,
+    { target: "_top" },
+  );
 };
 
-export const action = async ({ request }: ActionFunctionArgs) => {
-  const { billing } = await authenticate.admin(request);
-  const formData = await request.formData();
-  const intent = String(formData.get("intent") ?? "");
-
-  if (intent === "subscribe") {
-    // Throws a redirect to Shopify's payment-confirmation page.
-    await billing.request({ plan: PRO_PLAN, isTest: BILLING_TEST });
-    return null;
-  }
-
-  if (intent === "cancel") {
-    const { appSubscriptions } = await billing.check();
-    const active = appSubscriptions?.[0];
-    if (active) {
-      await billing.cancel({
-        subscriptionId: active.id,
-        isTest: BILLING_TEST,
-        prorate: true,
-      });
-    }
-    return { ok: true as const };
-  }
-
-  return null;
-};
-
-export default function PlanPage() {
-  const { currentPlanId, isTest } = useLoaderData<typeof loader>();
-  const submit = useSubmit();
-  const navigation = useNavigation();
-  const busy = navigation.state === "submitting";
-
-  const subscribe = () =>
-    submit({ intent: "subscribe" }, { method: "post" });
-  const cancel = () => submit({ intent: "cancel" }, { method: "post" });
-
-  const isPaid = currentPlanId === "pro" || currentPlanId === "plus";
-
+export default function PlanRedirect() {
+  // Normally never rendered — the loader redirects to Shopify's hosted page.
   return (
     <s-page heading="Plan & Preise">
       <s-section>
         <s-paragraph>
-          Wähle den Plan, der zu deinem Shop passt. Upgrade und Downgrade sind
-          jederzeit möglich – die Abrechnung läuft sicher über Shopify.
+          Du wirst zur Plan-Auswahl von Shopify weitergeleitet …
         </s-paragraph>
-        {currentPlanId === "plus" ? (
-          <s-paragraph>
-            <s-text color="subdued">
-              Dein Shop nutzt aktuell einen internen Plan (Plus) mit allen
-              Funktionen.
-            </s-text>
-          </s-paragraph>
-        ) : null}
-        {isTest ? (
-          <s-paragraph>
-            <s-badge tone="info">Testmodus</s-badge>{" "}
-            <s-text color="subdued">
-              In der Entwicklung werden keine echten Gebühren berechnet.
-            </s-text>
-          </s-paragraph>
-        ) : null}
       </s-section>
-
-      <div className={styles.grid}>
-        <div className={styles.card}>
-          <div className={styles.cardHeader}>
-            <span className={styles.planName}>{PLANS.free.name}</span>
-            {currentPlanId === "free" ? (
-              <s-badge tone="success">Aktueller Plan</s-badge>
-            ) : null}
-          </div>
-          <div className={styles.price}>
-            $0<span className={styles.interval}> / Monat</span>
-          </div>
-          <ul className={styles.featureList}>
-            <li>Bis zu {PLANS.free.limits.maxRules} Rabattregeln</li>
-            <li>Automatische Rabatte & Rabattcodes</li>
-            <li>Varianten- und Bedingungsauswahl</li>
-          </ul>
-          <div className={styles.actions}>
-            {currentPlanId === "free" ? (
-              <s-text color="subdued">Dein aktiver Plan</s-text>
-            ) : (
-              <AppActionButton
-                onAction={cancel}
-                {...(busy ? { loading: true } : {})}
-              >
-                Auf Free wechseln
-              </AppActionButton>
-            )}
-          </div>
-        </div>
-
-        <div className={`${styles.card} ${styles.cardFeatured}`}>
-          <div className={styles.cardHeader}>
-            <span className={styles.planName}>{PLANS.pro.name}</span>
-            {isPaid ? <s-badge tone="success">Aktueller Plan</s-badge> : null}
-          </div>
-          <div className={styles.price}>
-            ${PLANS.pro.priceMonthly}
-            <span className={styles.interval}> / Monat</span>
-          </div>
-          <ul className={styles.featureList}>
-            <li>Bis zu {PLANS.pro.limits.maxRules} Rabattregeln</li>
-            <li>Start-/Endzeit und Aktivierung pro Code</li>
-            <li>Alle Funktionen des Free-Plans</li>
-          </ul>
-          <div className={styles.actions}>
-            {currentPlanId === "pro" ? (
-              <AppActionButton
-                variant="tertiary"
-                tone="critical"
-                onAction={cancel}
-                {...(busy ? { loading: true } : {})}
-              >
-                Kündigen (Downgrade auf Free)
-              </AppActionButton>
-            ) : currentPlanId === "plus" ? (
-              <s-text color="subdued">Im internen Plan enthalten</s-text>
-            ) : (
-              <AppActionButton
-                variant="primary"
-                onAction={subscribe}
-                {...(busy ? { loading: true } : {})}
-              >
-                Auf Pro upgraden – ${PLANS.pro.priceMonthly}/Monat
-              </AppActionButton>
-            )}
-          </div>
-        </div>
-      </div>
     </s-page>
   );
 }
