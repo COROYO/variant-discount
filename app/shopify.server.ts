@@ -14,9 +14,6 @@ import { PLANS } from "./config/plans.shared";
  * `planFromSubscriptionName()` maps to the "pro" plan (PLANS.pro.name). */
 export const PRO_PLAN = "Pro" as const;
 
-/** Use Shopify test charges outside production so dev installs aren't billed. */
-export const BILLING_TEST = process.env.NODE_ENV !== "production";
-
 const shopify = shopifyApp({
   apiKey: process.env.SHOPIFY_API_KEY,
   apiSecretKey: process.env.SHOPIFY_API_SECRET || "",
