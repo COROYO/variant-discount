@@ -3,7 +3,12 @@ import type {
   HeadersFunction,
   LoaderFunctionArgs,
 } from "react-router";
-import { useLoaderData, useNavigation, useSubmit } from "react-router";
+import {
+  useActionData,
+  useLoaderData,
+  useNavigation,
+  useSubmit,
+} from "react-router";
 import { boundary } from "@shopify/shopify-app-react-router/server";
 import { authenticate, PRO_PLAN } from "../shopify.server";
 import { resolveBillingIsTest } from "../models/billing.server";
@@ -33,21 +38,99 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
 };
 
 export const action = async ({ request }: ActionFunctionArgs) => {
-  const { admin, billing } = await authenticate.admin(request);
+  const { admin, billing, session, redirect } =
+    await authenticate.admin(request);
   const formData = await request.formData();
   const intent = formData.get("_action");
 
   if (intent === "subscribe") {
-    // Create the Pro subscription via the Billing API. `billing.request`
-    // creates the charge and throws a redirect to Shopify's hosted
-    // charge-approval page, where the merchant accepts or declines. The
-    // redirect breaks out of the embedded iframe via App Bridge, so the
-    // approval page opens at the top level. This is the documented Billing API
-    // flow and needs no Partner-Dashboard pricing configuration — unlike the
-    // previous App Pricing redirect, which 404'd.
-    const isTest = await resolveBillingIsTest(admin);
-    await billing.request({ plan: PRO_PLAN, isTest });
-    return null; // unreachable: billing.request throws the redirect
+    try {
+      // Create the Pro subscription with the Billing API (`appSubscriptionCreate`)
+      // and send the merchant to Shopify's hosted charge-approval page, where
+      // they accept or decline the charge. `redirect` with target "_top" breaks
+      // out of the embedded iframe via App Bridge (the same proven mechanism the
+      // widerruf app uses). This needs no Partner-Dashboard pricing config —
+      // unlike the previous App Pricing redirect, which 404'd.
+      const isTest = await resolveBillingIsTest(admin);
+      const appUrl = (process.env.SHOPIFY_APP_URL || "").replace(/\/$/, "");
+      const returnUrl = `${appUrl}/app/plan?shop=${encodeURIComponent(
+        session.shop,
+      )}`;
+
+      const response = await admin.graphql(
+        `#graphql
+        mutation CreateProSubscription(
+          $name: String!
+          $returnUrl: URL!
+          $test: Boolean!
+          $lineItems: [AppSubscriptionLineItemInput!]!
+        ) {
+          appSubscriptionCreate(
+            name: $name
+            returnUrl: $returnUrl
+            test: $test
+            lineItems: $lineItems
+          ) {
+            confirmationUrl
+            userErrors {
+              field
+              message
+            }
+          }
+        }`,
+        {
+          variables: {
+            name: PRO_PLAN,
+            returnUrl,
+            test: isTest,
+            lineItems: [
+              {
+                plan: {
+                  appRecurringPricingDetails: {
+                    price: {
+                      amount: PLANS.pro.priceMonthly,
+                      currencyCode: "USD",
+                    },
+                    interval: "EVERY_30_DAYS",
+                  },
+                },
+              },
+            ],
+          },
+        },
+      );
+
+      const result = (await response.json()) as {
+        data?: {
+          appSubscriptionCreate?: {
+            confirmationUrl?: string | null;
+            userErrors?: { message: string }[];
+          };
+        };
+      };
+
+      const payload = result.data?.appSubscriptionCreate;
+      const userErrors = payload?.userErrors ?? [];
+      if (userErrors.length > 0 || !payload?.confirmationUrl) {
+        return {
+          error:
+            userErrors.map((e) => e.message).join(" ") ||
+            "Das Pro-Abo konnte nicht erstellt werden. Bitte versuche es erneut.",
+        };
+      }
+
+      throw redirect(payload.confirmationUrl, { target: "_top" });
+    } catch (error) {
+      // Let the redirect (and any other Response) propagate so App Bridge can
+      // perform the top-level redirect; only surface real errors in the UI.
+      if (error instanceof Response) throw error;
+      return {
+        error:
+          error instanceof Error
+            ? error.message
+            : "Unbekannter Fehler beim Erstellen des Abos.",
+      };
+    }
   }
 
   if (intent === "cancel") {
@@ -73,9 +156,13 @@ export const action = async ({ request }: ActionFunctionArgs) => {
 
 export default function PlanPage() {
   const { currentPlanId, isTest } = useLoaderData<typeof loader>();
+  const actionData = useActionData<typeof action>();
   const submit = useSubmit();
   const navigation = useNavigation();
   const busy = navigation.state === "submitting";
+
+  const errorMessage =
+    actionData && "error" in actionData ? actionData.error : null;
 
   const upgrade = () => submit({ _action: "subscribe" }, { method: "post" });
   const downgrade = () => submit({ _action: "cancel" }, { method: "post" });
@@ -103,6 +190,9 @@ export default function PlanPage() {
               In Entwicklungs-Shops fallen keine echten Gebühren an.
             </s-text>
           </s-paragraph>
+        ) : null}
+        {errorMessage ? (
+          <p style={{ color: "#bf0711", margin: "8px 0 0" }}>{errorMessage}</p>
         ) : null}
       </s-section>
 
