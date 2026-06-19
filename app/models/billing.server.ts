@@ -1,53 +1,26 @@
 /**
- * Billing helpers for the Shopify Billing API.
+ * URL of the Shopify App Pricing (formerly "Managed Pricing") plan selection
+ * page for this app. Shopify hosts this page; redirecting the merchant here —
+ * with the Admin `redirect` helper and target "_top" — escapes the embedded
+ * iframe cleanly and lets Shopify handle plan selection, approval, upgrades,
+ * downgrades and cancellation.
  *
- * Subscriptions are created with the Admin API (`appSubscriptionCreate`, via
- * the `billing.request` context helper) and the merchant is sent to Shopify's
- * hosted charge-approval page. This works without any Partner-Dashboard "App
- * Pricing" / Managed Pricing configuration — which is what previously 404'd
- * when selecting a paid plan.
- */
-
-/** Minimal shape of the Admin GraphQL client returned by `authenticate.admin`. */
-type AdminGraphqlClient = {
-  graphql: (
-    query: string,
-    options?: { variables?: Record<string, unknown> },
-  ) => Promise<Response>;
-};
-
-/**
- * Whether the shop is a Shopify development store. Development stores can't be
- * charged real money, so subscriptions there must be created as test charges.
- */
-export async function isDevelopmentStore(
-  admin: AdminGraphqlClient,
-): Promise<boolean> {
-  const response = await admin.graphql(`#graphql
-    query ShopPlan {
-      shop {
-        plan {
-          partnerDevelopment
-        }
-      }
-    }
-  `);
-  const result = (await response.json()) as {
-    data?: { shop?: { plan?: { partnerDevelopment?: boolean } } };
-  };
-  return result.data?.shop?.plan?.partnerDevelopment === true;
-}
-
-/**
- * Resolve whether a charge should be a Shopify *test* charge.
+ * Shopify App Pricing is mandatory for App Store apps: the Billing API
+ * (`appSubscriptionCreate`) is blocked for these apps ("Managed Pricing Apps
+ * cannot use the Billing API").
  *
- * Defaults to test charges so installs — including Shopify's App Store review —
- * are never billed real money. Only when `BILLING_TEST=false` is set explicitly
- * do we issue real charges, and even then only on live (non-development) stores.
+ * Two requirements for this URL to resolve (otherwise it 404s):
+ *   1. The app must have an `app_handle` — set via `handle` in shopify.app.toml
+ *      (or overridden here with SHOPIFY_APP_HANDLE).
+ *   2. At least one plan must be configured under Shopify App Pricing in the
+ *      Partner Dashboard.
+ *
+ * The store handle is derived from the shop domain.
  */
-export async function resolveBillingIsTest(
-  admin: AdminGraphqlClient,
-): Promise<boolean> {
-  if (process.env.BILLING_TEST !== "false") return true;
-  return isDevelopmentStore(admin);
+export function getShopifyAppPricingPlansUrl(
+  shop: string,
+  appHandle = process.env.SHOPIFY_APP_HANDLE || "variant-discounts",
+): string {
+  const storeHandle = shop.replace(/\.myshopify\.com$/, "");
+  return `https://admin.shopify.com/store/${storeHandle}/charges/${appHandle}/pricing_plans`;
 }

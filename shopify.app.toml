@@ -2,6 +2,7 @@
 
 client_id = "9933bf7ff01bbe0f820eba987e8029cf"
 name = "variant-discounts"
+handle = "variant-discounts"
 application_url = "https://variant-discounts.shrimpsoft.de"
 embedded = true
 
