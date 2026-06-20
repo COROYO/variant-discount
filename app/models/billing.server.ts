@@ -19,7 +19,7 @@
  */
 export function getShopifyAppPricingPlansUrl(
   shop: string,
-  appHandle = process.env.SHOPIFY_APP_HANDLE || "variant-discounts",
+  appHandle = process.env.SHOPIFY_APP_HANDLE || "variant-discount-10",
 ): string {
   const storeHandle = shop.replace(/\.myshopify\.com$/, "");
   return `https://admin.shopify.com/store/${storeHandle}/charges/${appHandle}/pricing_plans`;
