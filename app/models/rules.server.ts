@@ -387,9 +387,15 @@ const PRODUCTS_BY_TAGS = `#graphql
         endCursor
       }
       nodes {
+        id
+        title
+        featuredImage {
+          url
+        }
         variants(first: 100) {
           nodes {
             id
+            title
           }
         }
       }
@@ -401,10 +407,105 @@ type ProductsByTagsPage = {
   products: {
     pageInfo: { hasNextPage: boolean; endCursor: string | null };
     nodes: Array<{
-      variants: { nodes: Array<{ id: string }> };
+      id: string;
+      title: string;
+      featuredImage: { url: string } | null;
+      variants: { nodes: Array<{ id: string; title: string }> };
     }>;
   };
 };
+
+export type TagMatchedProduct = {
+  id: string;
+  title: string;
+  image?: string;
+  variants: Array<{
+    id: string;
+    title: string;
+    excluded: boolean;
+  }>;
+  includedVariantCount: number;
+};
+
+function buildTagSearchQuery(tags: string[]): string {
+  return tags
+    .map((tag) => `tag:${escapeProductTagForSearch(tag)}`)
+    .join(" OR ");
+}
+
+async function fetchProductsByTags(
+  admin: AdminGraphqlClient,
+  tags: string[],
+  maxProducts?: number,
+): Promise<{ products: ProductsByTagsPage["products"]["nodes"]; truncated: boolean }> {
+  if (tags.length === 0) {
+    return { products: [], truncated: false };
+  }
+
+  const query = buildTagSearchQuery(tags);
+  const products: ProductsByTagsPage["products"]["nodes"] = [];
+  let cursor: string | undefined;
+  let truncated = false;
+
+  for (;;) {
+    const page: ProductsByTagsPage = await adminGraphql<ProductsByTagsPage>(
+      admin,
+      PRODUCTS_BY_TAGS,
+      cursor ? { query, cursor } : { query },
+    );
+
+    for (const product of page.products.nodes) {
+      products.push(product);
+      if (maxProducts != null && products.length >= maxProducts) {
+        truncated =
+          page.products.pageInfo.hasNextPage ||
+          page.products.nodes.indexOf(product) < page.products.nodes.length - 1;
+        return { products, truncated: truncated || page.products.pageInfo.hasNextPage };
+      }
+    }
+
+    if (!page.products.pageInfo.hasNextPage) break;
+    cursor = page.products.pageInfo.endCursor ?? undefined;
+  }
+
+  return { products, truncated };
+}
+
+/** Products matching any of the given tags, with per-variant exclusion flags. */
+export async function resolveTagsToProducts(
+  admin: AdminGraphqlClient,
+  tags: string[],
+  excludedVariantIds: Set<string>,
+  maxProducts = 100,
+): Promise<{ products: TagMatchedProduct[]; truncated: boolean }> {
+  const { products: raw, truncated } = await fetchProductsByTags(
+    admin,
+    tags,
+    maxProducts,
+  );
+
+  const products = raw
+    .map((product) => {
+      const variants = product.variants.nodes.map((variant) => ({
+        id: variant.id,
+        title: variant.title,
+        excluded: excludedVariantIds.has(variant.id),
+      }));
+      return {
+        id: product.id,
+        title: product.title,
+        ...(product.featuredImage?.url
+          ? { image: product.featuredImage.url }
+          : {}),
+        variants,
+        includedVariantCount: variants.filter((variant) => !variant.excluded)
+          .length,
+      };
+    })
+    .sort((a, b) => a.title.localeCompare(b.title, "de"));
+
+  return { products, truncated };
+}
 
 /** Escape a product tag for Shopify Admin search syntax. */
 function escapeProductTagForSearch(tag: string): string {
@@ -423,31 +524,15 @@ export async function resolveTagsToVariantIds(
   tags: string[],
   excludedVariantIds: Set<string>,
 ): Promise<string[]> {
-  if (tags.length === 0) return [];
-
-  const query = tags
-    .map((tag) => `tag:${escapeProductTagForSearch(tag)}`)
-    .join(" OR ");
+  const { products } = await fetchProductsByTags(admin, tags);
   const variantIds = new Set<string>();
-  let cursor: string | undefined;
 
-  for (;;) {
-    const page: ProductsByTagsPage = await adminGraphql<ProductsByTagsPage>(
-      admin,
-      PRODUCTS_BY_TAGS,
-      cursor ? { query, cursor } : { query },
-    );
-
-    for (const product of page.products.nodes) {
-      for (const variant of product.variants.nodes) {
-        if (!excludedVariantIds.has(variant.id)) {
-          variantIds.add(variant.id);
-        }
+  for (const product of products) {
+    for (const variant of product.variants.nodes) {
+      if (!excludedVariantIds.has(variant.id)) {
+        variantIds.add(variant.id);
       }
     }
-
-    if (!page.products.pageInfo.hasNextPage) break;
-    cursor = page.products.pageInfo.endCursor ?? undefined;
   }
 
   return [...variantIds];
