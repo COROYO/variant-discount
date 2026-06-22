@@ -1,6 +1,6 @@
 import type { ActionFunctionArgs } from "react-router";
 import { authenticate } from "../shopify.server";
-import { pruneProductVariants, syncAllRules } from "../models/rules.server";
+import { pruneProductVariants, shopHasTagRules, syncAllRules } from "../models/rules.server";
 
 // When a product is deleted, remove all of its variants from every rule and
 // resync, so the discount config can't point at a non-existent product.
@@ -12,7 +12,8 @@ export const action = async ({ request }: ActionFunctionArgs) => {
   if (productId != null) {
     const productGid = `gid://shopify/Product/${productId}`;
     const changed = await pruneProductVariants(shop, productGid, null);
-    if (changed && admin) {
+    const hasTagRules = await shopHasTagRules(shop);
+    if (admin && (changed || hasTagRules)) {
       await syncAllRules(admin, shop);
     }
   }

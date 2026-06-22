@@ -1,7 +1,7 @@
 import { FieldValue, Timestamp } from "firebase-admin/firestore";
 import db from "../db.server";
 import { getPlan, type PlanDefinition, type PlanId } from "../config/plans.shared";
-import { setJsonMetafield, type AdminGraphqlClient } from "./admin-graphql.server";
+import { setJsonMetafield, adminGraphql, type AdminGraphqlClient } from "./admin-graphql.server";
 import {
   createCodeNode,
   deleteCodeDiscount,
@@ -41,7 +41,7 @@ function stripCodeScheduling(codes: RuleCode[]): RuleCode[] {
 export type RuleValueType = "percentage" | "fixedAmount";
 export type RuleStatus = "active" | "draft";
 export type RuleDiscountType = "automatic" | "code";
-export type RuleSelectionMode = "variants" | "condition";
+export type RuleSelectionMode = "variants" | "condition" | "tags";
 export type RuleCondition = "not_on_sale";
 
 /** Conditions the app supports for automatic (rule-based) variant selection. */
@@ -75,10 +75,12 @@ export interface RuleData {
   discountType: RuleDiscountType;
   selectionMode: RuleSelectionMode;
   condition: string;
+  tags: string[];
   valueType: RuleValueType;
   value: number;
   message: string | null;
   variants: RuleVariant[];
+  excludedVariants: RuleVariant[];
   codes: RuleCode[];
   discountId: string | null;
   createdAt: Date;
@@ -91,10 +93,12 @@ export interface RuleFormInput {
   discountType: RuleDiscountType;
   selectionMode: RuleSelectionMode;
   condition: string;
+  tags: string[];
   valueType: RuleValueType;
   value: number;
   message?: string | null;
   variants: RuleVariant[];
+  excludedVariants: RuleVariant[];
   codes: RuleCode[];
 }
 
@@ -105,10 +109,12 @@ interface RuleDoc {
   discountType: string;
   selectionMode: string;
   condition: string;
+  tags: string[];
   valueType: string;
   value: number;
   message: string | null;
   variants: RuleVariant[];
+  excludedVariants: RuleVariant[];
   codes: unknown[];
   discountId: string | null;
   createdAt: Timestamp;
@@ -116,6 +122,23 @@ interface RuleDoc {
 }
 
 const rulesCollection = () => db.collection("rules");
+
+/** Trim, de-dupe (case-insensitive), drop empty product tags. */
+function normalizeTags(tags: string[] | undefined): string[] {
+  if (!Array.isArray(tags)) return [];
+  const seen = new Set<string>();
+  const result: string[] = [];
+  for (const raw of tags) {
+    if (typeof raw !== "string") continue;
+    const tag = raw.trim();
+    if (!tag) continue;
+    const key = tag.toLowerCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    result.push(tag);
+  }
+  return result;
+}
 
 function normalizeVariants(variants: RuleVariant[] | undefined): RuleVariant[] {
   if (!Array.isArray(variants)) return [];
@@ -167,6 +190,12 @@ function normalizeRuleCodes(raw: unknown): RuleCode[] {
   return result;
 }
 
+function parseSelectionMode(value: string | undefined): RuleSelectionMode {
+  if (value === "condition") return "condition";
+  if (value === "tags") return "tags";
+  return "variants";
+}
+
 function docToRuleData(id: string, data: RuleDoc): RuleData {
   return {
     id,
@@ -174,12 +203,14 @@ function docToRuleData(id: string, data: RuleDoc): RuleData {
     title: data.title,
     status: data.status === "active" ? "active" : "draft",
     discountType: data.discountType === "code" ? "code" : "automatic",
-    selectionMode: data.selectionMode === "condition" ? "condition" : "variants",
+    selectionMode: parseSelectionMode(data.selectionMode),
     condition: data.condition ?? "",
+    tags: normalizeTags(data.tags),
     valueType: data.valueType === "fixedAmount" ? "fixedAmount" : "percentage",
     value: typeof data.value === "number" ? data.value : 0,
     message: data.message ?? null,
     variants: normalizeVariants(data.variants),
+    excludedVariants: normalizeVariants(data.excludedVariants),
     codes: normalizeRuleCodes(data.codes),
     discountId: data.discountId ?? null,
     createdAt: data.createdAt ? data.createdAt.toDate() : new Date(0),
@@ -188,8 +219,7 @@ function docToRuleData(id: string, data: RuleDoc): RuleData {
 }
 
 function sanitize(input: RuleFormInput) {
-  const selectionMode =
-    input.selectionMode === "condition" ? "condition" : "variants";
+  const selectionMode = parseSelectionMode(input.selectionMode);
   const condition =
     selectionMode === "condition"
       ? ALLOWED_CONDITIONS.includes(input.condition)
@@ -202,10 +232,16 @@ function sanitize(input: RuleFormInput) {
     discountType: input.discountType === "code" ? "code" : "automatic",
     selectionMode,
     condition,
+    tags: selectionMode === "tags" ? normalizeTags(input.tags ?? []) : [],
     valueType: input.valueType === "fixedAmount" ? "fixedAmount" : "percentage",
     value: Number.isFinite(input.value) ? Math.max(0, input.value) : 0,
     message: input.message?.trim() ? input.message.trim() : null,
-    variants: normalizeVariants(input.variants ?? []),
+    variants:
+      selectionMode === "variants" ? normalizeVariants(input.variants ?? []) : [],
+    excludedVariants:
+      selectionMode === "tags"
+        ? normalizeVariants(input.excludedVariants ?? [])
+        : [],
     codes: normalizeRuleCodes(input.codes ?? []),
   };
 }
@@ -299,6 +335,18 @@ export async function deleteRule(shop: string, id: string): Promise<void> {
  * removed; with `null` (products/delete) all of its variants are removed.
  * Returns true when at least one rule changed.
  */
+function pruneVariantList(
+  variants: RuleVariant[],
+  productGid: string,
+  keepVariantIds: Set<string> | null,
+): RuleVariant[] {
+  return variants.filter((variant) => {
+    if (variant.productId !== productGid) return true;
+    if (keepVariantIds === null) return false;
+    return keepVariantIds.has(variant.id);
+  });
+}
+
 export async function pruneProductVariants(
   shop: string,
   productGid: string,
@@ -309,15 +357,21 @@ export async function pruneProductVariants(
   for (const doc of snapshot.docs) {
     const data = doc.data() as RuleDoc;
     const variants = normalizeVariants(data.variants);
-    const next = variants.filter((variant) => {
-      if (variant.productId !== productGid) return true;
-      if (keepVariantIds === null) return false;
-      return keepVariantIds.has(variant.id);
-    });
-    if (next.length !== variants.length) {
+    const excludedVariants = normalizeVariants(data.excludedVariants);
+    const nextVariants = pruneVariantList(variants, productGid, keepVariantIds);
+    const nextExcluded = pruneVariantList(
+      excludedVariants,
+      productGid,
+      keepVariantIds,
+    );
+    if (
+      nextVariants.length !== variants.length ||
+      nextExcluded.length !== excludedVariants.length
+    ) {
       changed = true;
       await doc.ref.update({
-        variants: next,
+        variants: nextVariants,
+        excludedVariants: nextExcluded,
         updatedAt: FieldValue.serverTimestamp(),
       });
     }
@@ -325,35 +379,139 @@ export async function pruneProductVariants(
   return changed;
 }
 
-/**
- * Build the JSON consumed by the Shopify Function: only active rules that still
- * target at least one variant. Kept small — drafts and empty rules are omitted.
- */
-export function buildDiscountConfig(rules: RuleData[]) {
-  return {
-    rules: rules
-      .filter((rule) =>
-        rule.status === "active" && ruleHasTargets(rule),
-      )
-      .map((rule) => ({
-        id: rule.id,
-        status: "active" as const,
-        selectionMode: rule.selectionMode,
-        valueType: rule.valueType,
-        value: rule.value,
-        message: rule.message ?? "",
-        ...(rule.selectionMode === "condition"
-          ? { condition: rule.condition }
-          : { variantIds: rule.variants.map((variant) => variant.id) }),
-      })),
+const PRODUCTS_BY_TAGS = `#graphql
+  query ProductsByTags($query: String!, $cursor: String) {
+    products(first: 100, query: $query, after: $cursor) {
+      pageInfo {
+        hasNextPage
+        endCursor
+      }
+      nodes {
+        variants(first: 100) {
+          nodes {
+            id
+          }
+        }
+      }
+    }
+  }
+`;
+
+type ProductsByTagsPage = {
+  products: {
+    pageInfo: { hasNextPage: boolean; endCursor: string | null };
+    nodes: Array<{
+      variants: { nodes: Array<{ id: string }> };
+    }>;
   };
+};
+
+/** Escape a product tag for Shopify Admin search syntax. */
+function escapeProductTagForSearch(tag: string): string {
+  if (/[\s:"\\]/.test(tag)) {
+    return `"${tag.replace(/\\/g, "\\\\").replace(/"/g, '\\"')}"`;
+  }
+  return tag;
 }
 
-/** A rule "targets something" if it has a condition or at least one variant. */
+/**
+ * Resolve all variant GIDs for products that match any of the given tags,
+ * minus explicitly excluded variants.
+ */
+export async function resolveTagsToVariantIds(
+  admin: AdminGraphqlClient,
+  tags: string[],
+  excludedVariantIds: Set<string>,
+): Promise<string[]> {
+  if (tags.length === 0) return [];
+
+  const query = tags
+    .map((tag) => `tag:${escapeProductTagForSearch(tag)}`)
+    .join(" OR ");
+  const variantIds = new Set<string>();
+  let cursor: string | undefined;
+
+  for (;;) {
+    const page: ProductsByTagsPage = await adminGraphql<ProductsByTagsPage>(
+      admin,
+      PRODUCTS_BY_TAGS,
+      cursor ? { query, cursor } : { query },
+    );
+
+    for (const product of page.products.nodes) {
+      for (const variant of product.variants.nodes) {
+        if (!excludedVariantIds.has(variant.id)) {
+          variantIds.add(variant.id);
+        }
+      }
+    }
+
+    if (!page.products.pageInfo.hasNextPage) break;
+    cursor = page.products.pageInfo.endCursor ?? undefined;
+  }
+
+  return [...variantIds];
+}
+
+/** Whether the shop has at least one tag-based rule (for webhook resync). */
+export async function shopHasTagRules(shop: string): Promise<boolean> {
+  const snapshot = await rulesCollection().where("shop", "==", shop).get();
+  return snapshot.docs.some(
+    (doc) => parseSelectionMode((doc.data() as RuleDoc).selectionMode) === "tags",
+  );
+}
+
+/**
+ * Build the JSON consumed by the Shopify Function: only active rules that still
+ * target at least one variant. Tag rules are resolved to variant GIDs at sync
+ * time (minus exclusions). Kept small — drafts and empty rules are omitted.
+ */
+export async function buildDiscountConfig(
+  admin: AdminGraphqlClient,
+  rules: RuleData[],
+) {
+  const configRules = [];
+  for (const rule of rules) {
+    if (rule.status !== "active" || !ruleHasTargets(rule)) continue;
+
+    let variantIds: string[] = [];
+    if (rule.selectionMode === "variants") {
+      variantIds = rule.variants.map((variant) => variant.id);
+    } else if (rule.selectionMode === "tags") {
+      const excluded = new Set(rule.excludedVariants.map((variant) => variant.id));
+      variantIds = await resolveTagsToVariantIds(admin, rule.tags, excluded);
+    }
+
+    if (rule.selectionMode !== "condition" && variantIds.length === 0) {
+      continue;
+    }
+
+    configRules.push({
+      id: rule.id,
+      status: "active" as const,
+      selectionMode:
+        rule.selectionMode === "condition" ? ("condition" as const) : ("variants" as const),
+      valueType: rule.valueType,
+      value: rule.value,
+      message: rule.message ?? "",
+      ...(rule.selectionMode === "condition"
+        ? { condition: rule.condition }
+        : { variantIds }),
+    });
+  }
+
+  return { rules: configRules };
+}
+
+/** A rule "targets something" if it has a condition, tags, or at least one variant. */
 function ruleHasTargets(rule: RuleData): boolean {
-  return rule.selectionMode === "condition"
-    ? rule.condition.length > 0
-    : rule.variants.length > 0;
+  if (rule.selectionMode === "condition") {
+    return rule.condition.length > 0;
+  }
+  if (rule.selectionMode === "tags") {
+    return rule.tags.length > 0;
+  }
+  return rule.variants.length > 0;
 }
 
 /**
@@ -373,7 +531,7 @@ export async function syncAutomaticRules(
     ownerId: discountId,
     namespace: DISCOUNT_NAMESPACE,
     key: DISCOUNT_KEY,
-    value: buildDiscountConfig(automaticRules),
+    value: await buildDiscountConfig(admin, automaticRules),
   });
 }
 
@@ -392,7 +550,7 @@ export async function syncCodeRule(
     await deleteCodeDiscount(admin, rule.discountId).catch(() => {});
   }
 
-  const config = buildDiscountConfig([rule]);
+  const config = await buildDiscountConfig(admin, [rule]);
   const ruleLive = rule.status === "active" && ruleHasTargets(rule);
   const updatedCodes: RuleCode[] = [];
 

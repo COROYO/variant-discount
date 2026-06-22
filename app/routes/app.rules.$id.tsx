@@ -51,10 +51,12 @@ export const loader = async ({ request, params }: LoaderFunctionArgs) => {
         discountType: "automatic" as RuleDiscountType,
         selectionMode: "variants" as RuleSelectionMode,
         condition: "not_on_sale",
+        tags: [] as string[],
         valueType: "percentage" as RuleValueType,
         value: 10,
         message: "",
         variants: [] as RuleVariant[],
+        excludedVariants: [] as RuleVariant[],
         codes: [] as RuleCode[],
       },
       usage: emptyUsage,
@@ -76,10 +78,12 @@ export const loader = async ({ request, params }: LoaderFunctionArgs) => {
       discountType: rule.discountType,
       selectionMode: rule.selectionMode,
       condition: rule.condition || "not_on_sale",
+      tags: rule.tags,
       valueType: rule.valueType,
       value: rule.value,
       message: rule.message ?? "",
       variants: rule.variants,
+      excludedVariants: rule.excludedVariants,
       codes: rule.codes,
     },
     usage,
@@ -102,12 +106,23 @@ export const action = async ({ request, params }: ActionFunctionArgs) => {
     title: typeof body.title === "string" ? body.title : "",
     status: body.status === "active" ? "active" : "draft",
     discountType: body.discountType === "code" ? "code" : "automatic",
-    selectionMode: body.selectionMode === "condition" ? "condition" : "variants",
+    selectionMode:
+      body.selectionMode === "condition"
+        ? "condition"
+        : body.selectionMode === "tags"
+          ? "tags"
+          : "variants",
     condition: typeof body.condition === "string" ? body.condition : "",
+    tags: Array.isArray(body.tags)
+      ? body.tags.filter((tag): tag is string => typeof tag === "string")
+      : [],
     valueType: body.valueType === "fixedAmount" ? "fixedAmount" : "percentage",
     value: Number(body.value) || 0,
     message: typeof body.message === "string" ? body.message : null,
     variants: Array.isArray(body.variants) ? body.variants : [],
+    excludedVariants: Array.isArray(body.excludedVariants)
+      ? body.excludedVariants
+      : [],
     codes: Array.isArray(body.codes) ? body.codes : [],
   };
 
@@ -180,10 +195,16 @@ export default function RuleEditor() {
     rule.selectionMode,
   );
   const [condition, setCondition] = useState(rule.condition);
+  const [tags, setTags] = useState<string[]>(rule.tags);
+  const [tagInput, setTagInput] = useState("");
+  const [tagError, setTagError] = useState("");
   const [valueType, setValueType] = useState<RuleValueType>(rule.valueType);
   const [value, setValue] = useState(String(rule.value));
   const [message, setMessage] = useState(rule.message);
   const [variants, setVariants] = useState<RuleVariant[]>(rule.variants);
+  const [excludedVariants, setExcludedVariants] = useState<RuleVariant[]>(
+    rule.excludedVariants,
+  );
   const [codes, setCodes] = useState<RuleCode[]>(rule.codes);
   const [codeInput, setCodeInput] = useState("");
   const [codeError, setCodeError] = useState("");
@@ -252,6 +273,46 @@ export default function RuleEditor() {
 
   const removeVariant = (id: string) =>
     setVariants((prev) => prev.filter((variant) => variant.id !== id));
+
+  const addTag = () => {
+    const tag = tagInput.trim();
+    if (!tag) return;
+    if (tags.some((entry) => entry.toLowerCase() === tag.toLowerCase())) {
+      setTagError("Dieser Tag wurde bereits hinzugefügt.");
+      return;
+    }
+    setTags((prev) => [...prev, tag]);
+    setTagInput("");
+    setTagError("");
+  };
+
+  const removeTag = (tag: string) =>
+    setTags((prev) => prev.filter((entry) => entry !== tag));
+
+  const pickExcludedVariants = async () => {
+    const selection = await shopify.resourcePicker({
+      type: "variant",
+      multiple: true,
+      selectionIds: excludedVariants.map((variant) => ({ id: variant.id })),
+    });
+    if (!selection) return;
+    setExcludedVariants(
+      selection.map((variant) => ({
+        id: variant.id,
+        productId: variant.product?.id ?? "",
+        title:
+          variant.displayName ||
+          `${variant.product?.title ?? ""} · ${variant.title ?? ""}`.trim(),
+        image:
+          variant.image?.originalSrc ??
+          variant.product?.images?.[0]?.originalSrc ??
+          undefined,
+      })),
+    );
+  };
+
+  const removeExcludedVariant = (id: string) =>
+    setExcludedVariants((prev) => prev.filter((variant) => variant.id !== id));
 
   const addCode = () => {
     const code = codeInput.trim().toUpperCase();
@@ -323,10 +384,12 @@ export default function RuleEditor() {
         discountType,
         selectionMode,
         condition,
+        tags,
         valueType,
         value: Number(value) || 0,
         message,
         variants,
+        excludedVariants,
         codes,
       },
       { method: "post", encType: "application/json" },
@@ -384,6 +447,7 @@ export default function RuleEditor() {
             }
           >
             <s-option value="variants">Manuell ausgewählte Varianten</s-option>
+            <s-option value="tags">Produkte nach Tags</s-option>
             <s-option value="condition">Automatisch nach Bedingung</s-option>
           </s-select>
 
@@ -599,6 +663,104 @@ export default function RuleEditor() {
               reduzierte Artikel). Neue oder geänderte Produkte werden automatisch
               berücksichtigt – du musst keine Varianten manuell pflegen.
             </s-text>
+          </s-stack>
+        </s-section>
+      ) : selectionMode === "tags" ? (
+        <s-section heading="Produkt-Tags">
+          <s-stack direction="block" gap="base">
+            <s-text color="subdued">
+              Der Rabatt gilt für alle Varianten von Produkten mit mindestens einem
+              der Tags. Neue Produkte mit passendem Tag werden automatisch
+              einbezogen. Du kannst einzelne Varianten explizit ausschließen.
+            </s-text>
+            <s-stack direction="inline" gap="base" alignItems="end">
+              <s-text-field
+                label="Tag"
+                autocomplete="off"
+                value={tagInput}
+                error={tagError || undefined}
+                onChange={(event: Event) => {
+                  setTagInput(readValue(event));
+                  if (tagError) setTagError("");
+                }}
+              />
+              <AppActionButton onAction={addTag}>Hinzufügen</AppActionButton>
+            </s-stack>
+
+            {tags.length === 0 ? (
+              <s-text color="subdued">Noch keine Tags hinzugefügt.</s-text>
+            ) : (
+              <s-stack direction="inline" gap="base">
+                {tags.map((tag) => (
+                  <s-box
+                    key={tag}
+                    padding="base"
+                    borderWidth="base"
+                    borderRadius="base"
+                  >
+                    <s-stack direction="inline" gap="base" alignItems="center">
+                      <s-text>{tag}</s-text>
+                      <AppActionButton
+                        variant="tertiary"
+                        tone="critical"
+                        onAction={() => removeTag(tag)}
+                      >
+                        Entfernen
+                      </AppActionButton>
+                    </s-stack>
+                  </s-box>
+                ))}
+              </s-stack>
+            )}
+
+            <s-text type="strong">Ausgeschlossene Varianten</s-text>
+            <s-text color="subdued">
+              Varianten, die trotz passendem Produkt-Tag keinen Rabatt erhalten
+              sollen.
+            </s-text>
+            <AppActionButton onAction={pickExcludedVariants}>
+              Varianten ausschließen
+            </AppActionButton>
+
+            {excludedVariants.length === 0 ? (
+              <s-text color="subdued">Keine Varianten ausgeschlossen.</s-text>
+            ) : (
+              <s-stack direction="block" gap="base">
+                {excludedVariants.map((variant) => (
+                  <s-box
+                    key={variant.id}
+                    padding="base"
+                    borderWidth="base"
+                    borderRadius="base"
+                  >
+                    <s-stack
+                      direction="inline"
+                      gap="base"
+                      alignItems="center"
+                      justifyContent="space-between"
+                    >
+                      <s-stack direction="inline" gap="base" alignItems="center">
+                        {variant.image ? (
+                          <s-thumbnail
+                            src={variant.image}
+                            alt={variant.title}
+                            size="small"
+                          />
+                        ) : null}
+                        <s-text>{variant.title || variant.id}</s-text>
+                      </s-stack>
+                      <AppActionButton
+                        variant="tertiary"
+                        tone="critical"
+                        onAction={() => removeExcludedVariant(variant.id)}
+                      >
+                        Entfernen
+                      </AppActionButton>
+                    </s-stack>
+                  </s-box>
+                ))}
+              </s-stack>
+            )}
           </s-stack>
         </s-section>
       ) : (

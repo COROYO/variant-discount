@@ -29,8 +29,13 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     valueType: rule.valueType,
     value: rule.value,
     variantCount: rule.variants.length,
+    tagCount: rule.tags.length,
+    excludedCount: rule.excludedVariants.length,
     codeCount: rule.codes.length,
-    thumbnails: rule.variants
+    thumbnails: [
+      ...rule.variants,
+      ...rule.excludedVariants,
+    ]
       .map((variant) => variant.image)
       .filter((image): image is string => Boolean(image))
       .slice(0, 6),
@@ -60,10 +65,12 @@ export const action = async ({ request }: ActionFunctionArgs) => {
           discountType: rule.discountType,
           selectionMode: rule.selectionMode,
           condition: rule.condition,
+          tags: rule.tags,
           valueType: rule.valueType,
           value: rule.value,
           message: rule.message,
           variants: rule.variants,
+          excludedVariants: rule.excludedVariants,
           codes: rule.codes,
         },
         plan,
@@ -167,7 +174,9 @@ export default function RulesIndex() {
                       {formatValue(rule)} ·{" "}
                       {rule.selectionMode === "condition"
                         ? "nicht reduzierte Artikel"
-                        : `${rule.variantCount} Variante(n)`}
+                        : rule.selectionMode === "tags"
+                          ? `${rule.tagCount} Tag(s)${rule.excludedCount > 0 ? ` · ${rule.excludedCount} ausgeschlossen` : ""}`
+                          : `${rule.variantCount} Variante(n)`}
                       {rule.discountType === "code"
                         ? ` · ${rule.codeCount} Code(s)`
                         : ""}
