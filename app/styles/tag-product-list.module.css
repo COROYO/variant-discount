@@ -29,6 +29,14 @@
   background: #f6f6f7;
 }
 
+.selectedRow {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 8px;
+  min-height: 32px;
+}
+
 .thumb {
   width: 24px;
   height: 24px;

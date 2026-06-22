@@ -39,7 +39,9 @@ import { AppActionButton } from "../components/app-action-button";
 import { AppNavigateButton } from "../components/app-navigate-button";
 import { TagProductList } from "../components/tag-product-list";
 import { TagPillList } from "../components/tag-pill-list";
+import { VariantPickerModal } from "../components/variant-picker-modal";
 import layoutStyles from "../styles/rule-editor-layout.module.css";
+import variantListStyles from "../styles/tag-product-list.module.css";
 
 export const loader = async ({ request, params }: LoaderFunctionArgs) => {
   const { admin, session } = await authenticate.admin(request);
@@ -233,33 +235,25 @@ export default function RuleEditor() {
   const codeFieldRef = useRef<HTMLElement | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const addCodeRef = useRef<() => void>(() => {});
-  const tagPreviewKeyRef = useRef(
-    JSON.stringify({
-      tags: rule.tags,
-      excluded: rule.excludedVariants.map((variant) => variant.id).sort(),
-    }),
-  );
+  const [variantPickerOpen, setVariantPickerOpen] = useState(false);
+  const tagPreviewKeyRef = useRef(JSON.stringify({ tags: rule.tags }));
 
   const isSaving = navigation.state === "submitting";
-  const isTagPreviewLoading =
-    tagPreviewFetcher.state !== "idle" && selectionMode === "tags";
   const tagPreview = tagPreviewFetcher.data ?? initialTagPreview;
+  const isTagPreviewLoading =
+    tagPreviewFetcher.state !== "idle" &&
+    selectionMode === "tags" &&
+    tagPreview.products.length === 0;
 
   useEffect(() => {
     if (selectionMode !== "tags" || tags.length === 0) return;
-    const key = JSON.stringify({
-      tags,
-      excluded: excludedVariants.map((variant) => variant.id).sort(),
-    });
+    const key = JSON.stringify({ tags });
     if (tagPreviewKeyRef.current === key) return;
     tagPreviewKeyRef.current = key;
 
     const timeout = window.setTimeout(() => {
       tagPreviewFetcher.submit(
-        {
-          tags,
-          excludedVariantIds: excludedVariants.map((variant) => variant.id),
-        },
+        { tags },
         {
           method: "post",
           action: "/app/rules/preview-tags",
@@ -268,7 +262,7 @@ export default function RuleEditor() {
       );
     }, 350);
     return () => window.clearTimeout(timeout);
-  }, [tags, excludedVariants, selectionMode]);
+  }, [tags, selectionMode]);
 
   useEffect(() => {
     if (!actionData) return;
@@ -305,27 +299,7 @@ export default function RuleEditor() {
     return () => field.removeEventListener("keydown", handler);
   }, [discountType]);
 
-  const pickVariants = async () => {
-    const selection = await shopify.resourcePicker({
-      type: "variant",
-      multiple: true,
-      selectionIds: variants.map((variant) => ({ id: variant.id })),
-    });
-    if (!selection) return;
-    setVariants(
-      selection.map((variant) => ({
-        id: variant.id,
-        productId: variant.product?.id ?? "",
-        title:
-          variant.displayName ||
-          `${variant.product?.title ?? ""} · ${variant.title ?? ""}`.trim(),
-        image:
-          variant.image?.originalSrc ??
-          variant.product?.images?.[0]?.originalSrc ??
-          undefined,
-      })),
-    );
-  };
+  const pickVariants = () => setVariantPickerOpen(true);
 
   const removeVariant = (id: string) =>
     setVariants((prev) => prev.filter((variant) => variant.id !== id));
@@ -785,45 +759,65 @@ export default function RuleEditor() {
             {variants.length === 0 ? (
               <s-text color="subdued">Noch keine Varianten ausgewählt.</s-text>
             ) : (
-              <s-stack direction="block" gap="base">
-                {variants.map((variant) => (
-                  <s-box
-                    key={variant.id}
-                    padding="base"
-                    borderWidth="base"
-                    borderRadius="base"
-                  >
-                    <s-stack
-                      direction="inline"
-                      gap="base"
-                      alignItems="center"
-                      justifyContent="space-between"
-                    >
-                      <s-stack direction="inline" gap="base" alignItems="center">
+              <div className={variantListStyles.list}>
+                {variants.map((variant) => {
+                  const separator = variant.title.indexOf(" · ");
+                  const productTitle =
+                    separator >= 0
+                      ? variant.title.slice(0, separator)
+                      : variant.title;
+                  const variantTitle =
+                    separator >= 0 ? variant.title.slice(separator + 3) : "";
+
+                  return (
+                    <div key={variant.id} className={variantListStyles.productRow}>
+                      <div className={variantListStyles.selectedRow}>
                         {variant.image ? (
-                          <s-thumbnail
+                          <img
                             src={variant.image}
-                            alt={variant.title}
-                            size="small"
+                            alt=""
+                            className={variantListStyles.thumb}
                           />
-                        ) : null}
-                        <s-text>{variant.title || variant.id}</s-text>
-                      </s-stack>
-                      <AppActionButton
-                        variant="tertiary"
-                        tone="critical"
-                        onAction={() => removeVariant(variant.id)}
-                      >
-                        Entfernen
-                      </AppActionButton>
-                    </s-stack>
-                  </s-box>
-                ))}
-              </s-stack>
+                        ) : (
+                          <span
+                            className={variantListStyles.thumbPlaceholder}
+                            aria-hidden="true"
+                          />
+                        )}
+                        <span className={variantListStyles.productTitle}>
+                          {productTitle}
+                          {variantTitle ? (
+                            <>
+                              {" "}
+                              <span className={variantListStyles.meta}>
+                                · {variantTitle}
+                              </span>
+                            </>
+                          ) : null}
+                        </span>
+                        <AppActionButton
+                          variant="tertiary"
+                          tone="critical"
+                          onAction={() => removeVariant(variant.id)}
+                        >
+                          Entfernen
+                        </AppActionButton>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
             )}
           </s-stack>
         </s-section>
       )}
+
+      <VariantPickerModal
+        open={variantPickerOpen}
+        selectedVariants={variants}
+        onClose={() => setVariantPickerOpen(false)}
+        onConfirm={setVariants}
+      />
 
       <s-section>
         <AppNavigateButton variant="tertiary" to="/app">
