@@ -39,6 +39,7 @@ import { AppActionButton } from "../components/app-action-button";
 import { AppNavigateButton } from "../components/app-navigate-button";
 import { TagProductList } from "../components/tag-product-list";
 import { TagPillList } from "../components/tag-pill-list";
+import layoutStyles from "../styles/rule-editor-layout.module.css";
 
 export const loader = async ({ request, params }: LoaderFunctionArgs) => {
   const { admin, session } = await authenticate.admin(request);
@@ -436,82 +437,92 @@ export default function RuleEditor() {
         Speichern
       </AppActionButton>
 
-      <s-section heading="Einstellungen">
-        <s-stack direction="block" gap="base">
-          <s-text-field
-            label="Interner Titel"
-            name="title"
-            autocomplete="off"
-            value={title}
-            onChange={(event: Event) => setTitle(readValue(event))}
-          />
+      <s-section>
+      <div className={layoutStyles.layout}>
+        <aside className={layoutStyles.aside}>
+          <div className={layoutStyles.asideCard}>
+            <h2 className={layoutStyles.asideHeading}>Einstellungen</h2>
+            <s-stack direction="block" gap="base">
+              <s-text-field
+                label="Interner Titel"
+                name="title"
+                autocomplete="off"
+                value={title}
+                onChange={(event: Event) => setTitle(readValue(event))}
+              />
 
-          <s-select
-            label="Status"
-            name="status"
-            value={status}
-            onChange={(event: Event) => setStatus(readValue(event) as RuleStatus)}
-          >
-            <s-option value="draft">Entwurf</s-option>
-            <s-option value="active">Aktiv</s-option>
-          </s-select>
+              <s-select
+                label="Status"
+                name="status"
+                value={status}
+                onChange={(event: Event) =>
+                  setStatus(readValue(event) as RuleStatus)
+                }
+              >
+                <s-option value="draft">Entwurf</s-option>
+                <s-option value="active">Aktiv</s-option>
+              </s-select>
 
-          <s-select
-            label="Rabatttyp"
-            name="discountType"
-            value={discountType}
-            onChange={(event: Event) =>
-              setDiscountType(readValue(event) as RuleDiscountType)
-            }
-          >
-            <s-option value="automatic">Automatischer Rabatt</s-option>
-            <s-option value="code">Rabattcode</s-option>
-          </s-select>
+              <s-select
+                label="Rabatttyp"
+                name="discountType"
+                value={discountType}
+                onChange={(event: Event) =>
+                  setDiscountType(readValue(event) as RuleDiscountType)
+                }
+              >
+                <s-option value="automatic">Automatischer Rabatt</s-option>
+                <s-option value="code">Rabattcode</s-option>
+              </s-select>
 
-          <s-select
-            label="Variantenauswahl"
-            name="selectionMode"
-            value={selectionMode}
-            onChange={(event: Event) =>
-              setSelectionMode(readValue(event) as RuleSelectionMode)
-            }
-          >
-            <s-option value="variants">Manuell ausgewählte Varianten</s-option>
-            <s-option value="tags">Produkte nach Tags</s-option>
-            <s-option value="condition">Automatisch nach Bedingung</s-option>
-          </s-select>
+              <s-select
+                label="Variantenauswahl"
+                name="selectionMode"
+                value={selectionMode}
+                onChange={(event: Event) =>
+                  setSelectionMode(readValue(event) as RuleSelectionMode)
+                }
+              >
+                <s-option value="variants">Manuell ausgewählte Varianten</s-option>
+                <s-option value="tags">Produkte nach Tags</s-option>
+                <s-option value="condition">Automatisch nach Bedingung</s-option>
+              </s-select>
 
-          <s-select
-            label="Rabattart"
-            name="valueType"
-            value={valueType}
-            onChange={(event: Event) =>
-              setValueType(readValue(event) as RuleValueType)
-            }
-          >
-            <s-option value="percentage">Prozentual (%)</s-option>
-            <s-option value="fixedAmount">Fester Betrag pro Stück</s-option>
-          </s-select>
+              <s-select
+                label="Rabattart"
+                name="valueType"
+                value={valueType}
+                onChange={(event: Event) =>
+                  setValueType(readValue(event) as RuleValueType)
+                }
+              >
+                <s-option value="percentage">Prozentual (%)</s-option>
+                <s-option value="fixedAmount">Fester Betrag pro Stück</s-option>
+              </s-select>
 
-          <s-number-field
-            label={valueType === "percentage" ? "Rabatt in %" : "Rabatt pro Stück"}
-            name="value"
-            value={value}
-            min={0}
-            {...(valueType === "percentage" ? { max: 100 } : {})}
-            onChange={(event: Event) => setValue(readValue(event))}
-          />
+              <s-number-field
+                label={
+                  valueType === "percentage" ? "Rabatt in %" : "Rabatt pro Stück"
+                }
+                name="value"
+                value={value}
+                min={0}
+                {...(valueType === "percentage" ? { max: 100 } : {})}
+                onChange={(event: Event) => setValue(readValue(event))}
+              />
 
-          <s-text-field
-            label="Hinweistext im Warenkorb (optional)"
-            name="message"
-            autocomplete="off"
-            value={message}
-            onChange={(event: Event) => setMessage(readValue(event))}
-          />
-        </s-stack>
-      </s-section>
+              <s-text-field
+                label="Hinweistext im Warenkorb (optional)"
+                name="message"
+                autocomplete="off"
+                value={message}
+                onChange={(event: Event) => setMessage(readValue(event))}
+              />
+            </s-stack>
+          </div>
+        </aside>
 
+        <div className={layoutStyles.main}>
       {discountType === "code" ? (
         <s-section heading="Rabattcodes">
           <s-stack direction="block" gap="base">
@@ -818,6 +829,9 @@ export default function RuleEditor() {
         <AppNavigateButton variant="tertiary" to="/app">
           Abbrechen
         </AppNavigateButton>
+      </s-section>
+        </div>
+      </div>
       </s-section>
     </s-page>
   );
