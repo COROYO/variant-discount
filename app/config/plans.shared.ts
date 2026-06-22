@@ -68,10 +68,10 @@ export function getPlan(id: PlanId | string | null | undefined): PlanDefinition 
  * Resolve a plan from a Shopify AppSubscription name. Returns the default plan
  * when no subscription is active or the name is unknown.
  *
- * Any subscription whose name contains the word "plus" (case-insensitive)
- * resolves to the `plus` plan — that's our internal flag for fully-unlocked
- * partner / staff / special plans, regardless of where "plus" sits in the
- * handle ("Pro Plus", "Plus Partner", "Founders Plus", …).
+ * Matching order:
+ * 1. Names containing "plus" → `plus` (internal/partner/staff plans)
+ * 2. Names containing "pro" → `pro` (billing variants like "pro-test", "test-pro")
+ * 3. Exact name match for remaining plans (e.g. "Free")
  */
 export function planFromSubscriptionName(
   name: string | null | undefined,
@@ -79,8 +79,9 @@ export function planFromSubscriptionName(
   if (!name) return DEFAULT_PLAN;
   const normalized = name.trim().toLowerCase();
   if (normalized.includes("plus")) return "plus";
+  if (normalized.includes("pro")) return "pro";
   for (const plan of Object.values(PLANS)) {
-    if (plan.id === "plus") continue;
+    if (plan.id === "plus" || plan.id === "pro") continue;
     if (plan.name.toLowerCase() === normalized) return plan.id;
   }
   return DEFAULT_PLAN;

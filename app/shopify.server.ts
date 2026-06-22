@@ -10,8 +10,9 @@ import { FirestoreSessionStorage } from "./firestore-session-storage.server";
 import { verifyWebhookHmacAndRebuild } from "./utils/verify-webhook-hmac.server";
 import { PLANS } from "./config/plans.shared";
 
-/** Billing plan key. Must equal the Shopify subscription name that
- * `planFromSubscriptionName()` maps to the "pro" plan (PLANS.pro.name). */
+/** Billing plan key for the default Pro subscription. Any subscription name
+ * containing "pro" (e.g. "Pro", "pro-test") resolves to the pro plan via
+ * `planFromSubscriptionName()`. */
 export const PRO_PLAN = "Pro" as const;
 
 const shopify = shopifyApp({
