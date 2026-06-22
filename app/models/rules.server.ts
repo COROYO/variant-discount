@@ -124,7 +124,7 @@ interface RuleDoc {
 const rulesCollection = () => db.collection("rules");
 
 /** Trim, de-dupe (case-insensitive), drop empty product tags. */
-function normalizeTags(tags: string[] | undefined): string[] {
+export function normalizeTags(tags: string[] | undefined): string[] {
   if (!Array.isArray(tags)) return [];
   const seen = new Set<string>();
   const result: string[] = [];
@@ -445,7 +445,6 @@ async function fetchProductsByTags(
   const query = buildTagSearchQuery(tags);
   const products: ProductsByTagsPage["products"]["nodes"] = [];
   let cursor: string | undefined;
-  let truncated = false;
 
   for (;;) {
     const page: ProductsByTagsPage = await adminGraphql<ProductsByTagsPage>(
@@ -457,10 +456,12 @@ async function fetchProductsByTags(
     for (const product of page.products.nodes) {
       products.push(product);
       if (maxProducts != null && products.length >= maxProducts) {
-        truncated =
-          page.products.pageInfo.hasNextPage ||
-          page.products.nodes.indexOf(product) < page.products.nodes.length - 1;
-        return { products, truncated: truncated || page.products.pageInfo.hasNextPage };
+        const productIndex = page.products.nodes.indexOf(product);
+        const hasMoreInPage = productIndex < page.products.nodes.length - 1;
+        return {
+          products,
+          truncated: hasMoreInPage || page.products.pageInfo.hasNextPage,
+        };
       }
     }
 
@@ -468,7 +469,7 @@ async function fetchProductsByTags(
     cursor = page.products.pageInfo.endCursor ?? undefined;
   }
 
-  return { products, truncated };
+  return { products, truncated: false };
 }
 
 /** Products matching any of the given tags, with per-variant exclusion flags. */

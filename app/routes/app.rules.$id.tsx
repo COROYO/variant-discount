@@ -6,6 +6,7 @@ import type {
 } from "react-router";
 import {
   useActionData,
+  useFetcher,
   useLoaderData,
   useNavigate,
   useNavigation,
@@ -21,6 +22,7 @@ import {
   getRule,
   getRuleCodeUsage,
   PlanLimitError,
+  resolveTagsToProducts,
   updateRule,
   type RuleCode,
   type RuleDiscountType,
@@ -29,6 +31,7 @@ import {
   type RuleStatus,
   type RuleValueType,
   type RuleVariant,
+  type TagMatchedProduct,
 } from "../models/rules.server";
 import type { CodeUsageInfo } from "../models/discount.server";
 import { getCurrentPlan } from "../models/plan.server";
@@ -41,6 +44,7 @@ export const loader = async ({ request, params }: LoaderFunctionArgs) => {
   const plan = await getCurrentPlan(admin);
 
   const emptyUsage: Record<string, CodeUsageInfo> = {};
+  const emptyTagPreview = { products: [] as TagMatchedProduct[], truncated: false };
 
   if (id === "new") {
     return {
@@ -60,6 +64,7 @@ export const loader = async ({ request, params }: LoaderFunctionArgs) => {
         codes: [] as RuleCode[],
       },
       usage: emptyUsage,
+      tagPreview: emptyTagPreview,
       plan,
     };
   }
@@ -70,6 +75,14 @@ export const loader = async ({ request, params }: LoaderFunctionArgs) => {
   }
   // Live usage + status per code (best-effort; never blocks editing).
   const usage = await getRuleCodeUsage(admin, rule).catch(() => emptyUsage);
+  const tagPreview =
+    rule.selectionMode === "tags" && rule.tags.length > 0
+      ? await resolveTagsToProducts(
+          admin,
+          rule.tags,
+          new Set(rule.excludedVariants.map((variant) => variant.id)),
+        ).catch(() => emptyTagPreview)
+      : emptyTagPreview;
   return {
     rule: {
       id: rule.id,
@@ -87,6 +100,7 @@ export const loader = async ({ request, params }: LoaderFunctionArgs) => {
       codes: rule.codes,
     },
     usage,
+    tagPreview,
     plan,
   };
 };
@@ -179,8 +193,13 @@ function localInputToIso(local: string): string | null {
 }
 
 export default function RuleEditor() {
-  const { rule, usage, plan } = useLoaderData<typeof loader>();
+  const { rule, usage, tagPreview: initialTagPreview, plan } =
+    useLoaderData<typeof loader>();
   const actionData = useActionData<typeof action>();
+  const tagPreviewFetcher = useFetcher<{
+    products: TagMatchedProduct[];
+    truncated: boolean;
+  }>();
   const navigate = useNavigate();
   const navigation = useNavigation();
   const submit = useSubmit();
@@ -211,8 +230,42 @@ export default function RuleEditor() {
   const codeFieldRef = useRef<HTMLElement | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const addCodeRef = useRef<() => void>(() => {});
+  const tagPreviewKeyRef = useRef(
+    JSON.stringify({
+      tags: rule.tags,
+      excluded: rule.excludedVariants.map((variant) => variant.id).sort(),
+    }),
+  );
 
   const isSaving = navigation.state === "submitting";
+  const isTagPreviewLoading =
+    tagPreviewFetcher.state !== "idle" && selectionMode === "tags";
+  const tagPreview = tagPreviewFetcher.data ?? initialTagPreview;
+
+  useEffect(() => {
+    if (selectionMode !== "tags" || tags.length === 0) return;
+    const key = JSON.stringify({
+      tags,
+      excluded: excludedVariants.map((variant) => variant.id).sort(),
+    });
+    if (tagPreviewKeyRef.current === key) return;
+    tagPreviewKeyRef.current = key;
+
+    const timeout = window.setTimeout(() => {
+      tagPreviewFetcher.submit(
+        {
+          tags,
+          excludedVariantIds: excludedVariants.map((variant) => variant.id),
+        },
+        {
+          method: "post",
+          action: "/app/rules/preview-tags",
+          encType: "application/json",
+        },
+      );
+    }, 350);
+    return () => window.clearTimeout(timeout);
+  }, [tags, excludedVariants, selectionMode]);
 
   useEffect(() => {
     if (!actionData) return;
@@ -712,6 +765,74 @@ export default function RuleEditor() {
                 ))}
               </s-stack>
             )}
+
+            {tags.length > 0 ? (
+              <s-stack direction="block" gap="base">
+                <s-text type="strong">Gefundene Produkte</s-text>
+                {isTagPreviewLoading ? (
+                  <s-text color="subdued">Produkte werden geladen…</s-text>
+                ) : tagPreview.products.length === 0 ? (
+                  <s-text color="subdued">
+                    Keine Produkte mit diesen Tags gefunden.
+                  </s-text>
+                ) : (
+                  <>
+                    <s-text color="subdued">
+                      {tagPreview.products.length} Produkt(e)
+                      {tagPreview.truncated ? " (Auszug, es gibt weitere)" : ""}
+                    </s-text>
+                    <s-stack direction="block" gap="base">
+                      {tagPreview.products.map((product) => (
+                        <s-box
+                          key={product.id}
+                          padding="base"
+                          borderWidth="base"
+                          borderRadius="base"
+                        >
+                          <s-stack direction="block" gap="base">
+                            <s-stack
+                              direction="inline"
+                              gap="base"
+                              alignItems="center"
+                            >
+                              {product.image ? (
+                                <s-thumbnail
+                                  src={product.image}
+                                  alt={product.title}
+                                  size="small"
+                                />
+                              ) : null}
+                              <s-stack direction="block" gap="base">
+                                <s-text type="strong">{product.title}</s-text>
+                                <s-text color="subdued">
+                                  {product.includedVariantCount === 0
+                                    ? "Alle Varianten ausgeschlossen"
+                                    : product.includedVariantCount ===
+                                        product.variants.length
+                                      ? `${product.variants.length} Variante(n) rabattiert`
+                                      : `${product.includedVariantCount} von ${product.variants.length} Variante(n) rabattiert`}
+                                </s-text>
+                              </s-stack>
+                            </s-stack>
+                            {product.variants.some(
+                              (variant) => variant.excluded,
+                            ) ? (
+                              <s-text color="subdued">
+                                Ausgeschlossen:{" "}
+                                {product.variants
+                                  .filter((variant) => variant.excluded)
+                                  .map((variant) => variant.title)
+                                  .join(", ")}
+                              </s-text>
+                            ) : null}
+                          </s-stack>
+                        </s-box>
+                      ))}
+                    </s-stack>
+                  </>
+                )}
+              </s-stack>
+            ) : null}
 
             <s-text type="strong">Ausgeschlossene Varianten</s-text>
             <s-text color="subdued">

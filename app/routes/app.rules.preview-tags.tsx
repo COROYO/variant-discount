@@ -1,9 +1,6 @@
 import type { ActionFunctionArgs } from "react-router";
 import { authenticate } from "../shopify.server";
-import {
-  normalizeTagsForPreview,
-  resolveTagsToProducts,
-} from "../models/rules.server";
+import { normalizeTags, resolveTagsToProducts } from "../models/rules.server";
 
 export const action = async ({ request }: ActionFunctionArgs) => {
   const { admin } = await authenticate.admin(request);
@@ -12,7 +9,9 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     excludedVariantIds?: unknown;
   };
 
-  const tags = normalizeTagsForPreview(body.tags);
+  const tags = normalizeTags(
+    Array.isArray(body.tags) ? (body.tags as string[]) : undefined,
+  );
   const excludedVariantIds = new Set(
     Array.isArray(body.excludedVariantIds)
       ? body.excludedVariantIds.filter(
