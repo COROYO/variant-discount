@@ -41,6 +41,7 @@ import { TagProductList } from "../components/tag-product-list";
 import { TagPillList } from "../components/tag-pill-list";
 import { VariantPickerModal } from "../components/variant-picker-modal";
 import layoutStyles from "../styles/rule-editor-layout.module.css";
+import tagStyles from "../styles/tag-pills.module.css";
 import variantListStyles from "../styles/tag-product-list.module.css";
 
 export const loader = async ({ request, params }: LoaderFunctionArgs) => {
@@ -237,11 +238,22 @@ export default function RuleEditor() {
   const addCodeRef = useRef<() => void>(() => {});
   const [variantPickerOpen, setVariantPickerOpen] = useState(false);
   const tagPreviewKeyRef = useRef(JSON.stringify({ tags: rule.tags }));
+  const tagPreviewCacheRef = useRef(initialTagPreview);
 
   const isSaving = navigation.state === "submitting";
-  const tagPreview = tagPreviewFetcher.data ?? initialTagPreview;
+  const tagPreviewFromSources = tagPreviewFetcher.data ?? initialTagPreview;
+  const isTagPreviewFetcherLoading = tagPreviewFetcher.state !== "idle";
+  if (tagPreviewFromSources.products.length > 0) {
+    tagPreviewCacheRef.current = tagPreviewFromSources;
+  }
+  const tagPreview =
+    tagPreviewFromSources.products.length > 0
+      ? tagPreviewFromSources
+      : isTagPreviewFetcherLoading
+        ? tagPreviewCacheRef.current
+        : tagPreviewFromSources;
   const isTagPreviewLoading =
-    tagPreviewFetcher.state !== "idle" &&
+    isTagPreviewFetcherLoading &&
     selectionMode === "tags" &&
     tagPreview.products.length === 0;
 
@@ -688,19 +700,42 @@ export default function RuleEditor() {
               der Tags. Klappe ein Produkt auf, um einzelne Varianten
               auszuschließen.
             </s-text>
-            <s-stack direction="inline" gap="base" alignItems="end">
-              <s-text-field
-                label="Tag"
-                autocomplete="off"
-                value={tagInput}
-                error={tagError || undefined}
-                onChange={(event: Event) => {
-                  setTagInput(readValue(event));
-                  if (tagError) setTagError("");
-                }}
-              />
+            <form
+              className={tagStyles.addForm}
+              autoComplete="off"
+              onSubmit={(event) => {
+                event.preventDefault();
+                addTag();
+              }}
+            >
+              <div className={tagStyles.addField}>
+                <label className={tagStyles.addLabel} htmlFor="rule-product-tag">
+                  Tag
+                </label>
+                <input
+                  id="rule-product-tag"
+                  className={`${tagStyles.addInput}${tagError ? ` ${tagStyles.addInputError}` : ""}`}
+                  type="text"
+                  name="rule-product-tag"
+                  value={tagInput}
+                  autoComplete="off"
+                  autoCorrect="off"
+                  autoCapitalize="off"
+                  spellCheck={false}
+                  data-1p-ignore="true"
+                  data-lpignore="true"
+                  data-form-type="other"
+                  onChange={(event) => {
+                    setTagInput(event.currentTarget.value);
+                    if (tagError) setTagError("");
+                  }}
+                />
+                {tagError ? (
+                  <span className={tagStyles.addError}>{tagError}</span>
+                ) : null}
+              </div>
               <AppActionButton onAction={addTag}>Hinzufügen</AppActionButton>
-            </s-stack>
+            </form>
 
             {tags.length === 0 ? (
               <s-text color="subdued">Noch keine Tags hinzugefügt.</s-text>
@@ -721,11 +756,12 @@ export default function RuleEditor() {
                 </s-stack>
                 {isTagPreviewLoading ? (
                   <s-text color="subdued">Produkte werden geladen…</s-text>
-                ) : tagPreview.products.length === 0 ? (
+                ) : null}
+                {!isTagPreviewLoading && tagPreview.products.length === 0 ? (
                   <s-text color="subdued">
                     Keine Produkte mit diesen Tags gefunden.
                   </s-text>
-                ) : (
+                ) : tagPreview.products.length > 0 ? (
                   <>
                     {tagPreview.truncated ? (
                       <s-text color="subdued">
@@ -738,7 +774,7 @@ export default function RuleEditor() {
                       onExcludedVariantsChange={setExcludedVariants}
                     />
                   </>
-                )}
+                ) : null}
               </s-stack>
             ) : null}
           </s-stack>

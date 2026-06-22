@@ -54,3 +54,47 @@
   outline: 2px solid #005bd3;
   outline-offset: 1px;
 }
+
+.addForm {
+  display: flex;
+  align-items: flex-end;
+  gap: 8px;
+}
+
+.addField {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-width: 0;
+  gap: 4px;
+}
+
+.addLabel {
+  font-size: 13px;
+  font-weight: 500;
+  color: #303030;
+}
+
+.addInput {
+  width: 100%;
+  box-sizing: border-box;
+  padding: 8px 12px;
+  border: 1px solid #c9cccf;
+  border-radius: 8px;
+  font-size: 14px;
+}
+
+.addInput:focus {
+  outline: 2px solid #005bd3;
+  outline-offset: 1px;
+  border-color: #005bd3;
+}
+
+.addInputError {
+  border-color: #8e0b21;
+}
+
+.addError {
+  font-size: 12px;
+  color: #8e0b21;
+}

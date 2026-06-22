@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useMemo, useState, type MouseEvent } from "react";
 import type { TagMatchedProduct, RuleVariant } from "../models/rules.server";
 import styles from "../styles/tag-product-list.module.css";
 
@@ -41,9 +41,13 @@ export function TagProductList({
   };
 
   const toggleVariantExclusion = (
+    event: MouseEvent,
     product: TagMatchedProduct,
     variant: { id: string; title: string },
   ) => {
+    event.preventDefault();
+    event.stopPropagation();
+
     if (excludedIds.has(variant.id)) {
       onExcludedVariantsChange(
         excludedVariants.filter((entry) => entry.id !== variant.id),
@@ -118,8 +122,8 @@ export function TagProductList({
                             ? styles.linkButton
                             : styles.linkButtonCritical
                         }
-                        onClick={() =>
-                          toggleVariantExclusion(product, variant)
+                        onClick={(event) =>
+                          toggleVariantExclusion(event, product, variant)
                         }
                       >
                         {isExcluded ? "Einbeziehen" : "Ausschließen"}
