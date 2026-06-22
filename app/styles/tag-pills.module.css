@@ -1,0 +1,56 @@
+.list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.pill {
+  display: inline-flex;
+  align-items: center;
+  max-width: 100%;
+  min-height: 20px;
+  padding: 2px 8px;
+  background: #ebebeb;
+  border-radius: 999px;
+  font-size: 12px;
+  line-height: 16px;
+  color: #303030;
+}
+
+.label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.remove {
+  display: none;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+  padding: 0;
+  margin-left: 2px;
+  border: none;
+  background: transparent;
+  border-radius: 4px;
+  font-size: 14px;
+  line-height: 1;
+  color: #616161;
+  cursor: pointer;
+}
+
+.pill:hover .remove,
+.pill:focus-within .remove {
+  display: inline-flex;
+}
+
+.remove:hover {
+  background: rgb(0 0 0 / 8%);
+  color: #303030;
+}
+
+.remove:focus-visible {
+  outline: 2px solid #005bd3;
+  outline-offset: 1px;
+}

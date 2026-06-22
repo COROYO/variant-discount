@@ -1,0 +1,124 @@
+.list {
+  border: 1px solid #e3e3e3;
+  border-radius: 8px;
+  overflow: hidden;
+}
+
+.productRow {
+  border-bottom: 1px solid #e3e3e3;
+}
+
+.productRow:last-child {
+  border-bottom: none;
+}
+
+.productHeader {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 4px 8px;
+  border: none;
+  background: transparent;
+  cursor: pointer;
+  text-align: left;
+  min-height: 32px;
+}
+
+.productHeader:hover {
+  background: #f6f6f7;
+}
+
+.thumb {
+  width: 24px;
+  height: 24px;
+  object-fit: cover;
+  border-radius: 4px;
+  flex-shrink: 0;
+}
+
+.thumbPlaceholder {
+  width: 24px;
+  height: 24px;
+  border-radius: 4px;
+  flex-shrink: 0;
+  background: #f1f1f1;
+}
+
+.productTitle {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 13px;
+  line-height: 1.3;
+}
+
+.meta {
+  flex-shrink: 0;
+  font-size: 11px;
+  color: #616161;
+  white-space: nowrap;
+}
+
+.chevron {
+  flex-shrink: 0;
+  width: 16px;
+  color: #616161;
+  font-size: 11px;
+  text-align: center;
+}
+
+.variantList {
+  background: #fafafa;
+  border-top: 1px solid #ebebeb;
+}
+
+.variantRow {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 2px 8px 2px 40px;
+  min-height: 28px;
+}
+
+.variantTitle {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 12px;
+  line-height: 1.3;
+}
+
+.variantTitleExcluded {
+  composes: variantTitle;
+  color: #8c9196;
+  text-decoration: line-through;
+}
+
+.variantAction {
+  flex-shrink: 0;
+}
+
+.linkButton {
+  border: none;
+  background: none;
+  padding: 0;
+  font-size: 11px;
+  line-height: 1.3;
+  cursor: pointer;
+  color: #005bd3;
+}
+
+.linkButton:hover {
+  text-decoration: underline;
+}
+
+.linkButtonCritical {
+  composes: linkButton;
+  color: #8e0b21;
+}

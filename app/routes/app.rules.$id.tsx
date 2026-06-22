@@ -37,6 +37,8 @@ import type { CodeUsageInfo } from "../models/discount.server";
 import { getCurrentPlan } from "../models/plan.server";
 import { AppActionButton } from "../components/app-action-button";
 import { AppNavigateButton } from "../components/app-navigate-button";
+import { TagProductList } from "../components/tag-product-list";
+import { TagPillList } from "../components/tag-pill-list";
 
 export const loader = async ({ request, params }: LoaderFunctionArgs) => {
   const { admin, session } = await authenticate.admin(request);
@@ -341,31 +343,6 @@ export default function RuleEditor() {
 
   const removeTag = (tag: string) =>
     setTags((prev) => prev.filter((entry) => entry !== tag));
-
-  const pickExcludedVariants = async () => {
-    const selection = await shopify.resourcePicker({
-      type: "variant",
-      multiple: true,
-      selectionIds: excludedVariants.map((variant) => ({ id: variant.id })),
-    });
-    if (!selection) return;
-    setExcludedVariants(
-      selection.map((variant) => ({
-        id: variant.id,
-        productId: variant.product?.id ?? "",
-        title:
-          variant.displayName ||
-          `${variant.product?.title ?? ""} · ${variant.title ?? ""}`.trim(),
-        image:
-          variant.image?.originalSrc ??
-          variant.product?.images?.[0]?.originalSrc ??
-          undefined,
-      })),
-    );
-  };
-
-  const removeExcludedVariant = (id: string) =>
-    setExcludedVariants((prev) => prev.filter((variant) => variant.id !== id));
 
   const addCode = () => {
     const code = codeInput.trim().toUpperCase();
@@ -723,8 +700,8 @@ export default function RuleEditor() {
           <s-stack direction="block" gap="base">
             <s-text color="subdued">
               Der Rabatt gilt für alle Varianten von Produkten mit mindestens einem
-              der Tags. Neue Produkte mit passendem Tag werden automatisch
-              einbezogen. Du kannst einzelne Varianten explizit ausschließen.
+              der Tags. Klappe ein Produkt auf, um einzelne Varianten
+              auszuschließen.
             </s-text>
             <s-stack direction="inline" gap="base" alignItems="end">
               <s-text-field
@@ -743,32 +720,20 @@ export default function RuleEditor() {
             {tags.length === 0 ? (
               <s-text color="subdued">Noch keine Tags hinzugefügt.</s-text>
             ) : (
-              <s-stack direction="inline" gap="base">
-                {tags.map((tag) => (
-                  <s-box
-                    key={tag}
-                    padding="base"
-                    borderWidth="base"
-                    borderRadius="base"
-                  >
-                    <s-stack direction="inline" gap="base" alignItems="center">
-                      <s-text>{tag}</s-text>
-                      <AppActionButton
-                        variant="tertiary"
-                        tone="critical"
-                        onAction={() => removeTag(tag)}
-                      >
-                        Entfernen
-                      </AppActionButton>
-                    </s-stack>
-                  </s-box>
-                ))}
-              </s-stack>
+              <TagPillList tags={tags} onRemove={removeTag} />
             )}
 
             {tags.length > 0 ? (
-              <s-stack direction="block" gap="base">
-                <s-text type="strong">Gefundene Produkte</s-text>
+              <s-stack direction="block" gap="small">
+                <s-stack direction="inline" gap="base" alignItems="center">
+                  <s-text type="strong">Gefundene Produkte</s-text>
+                  {!isTagPreviewLoading && tagPreview.products.length > 0 ? (
+                    <s-text color="subdued">
+                      {tagPreview.products.length}
+                      {tagPreview.truncated ? "+" : ""}
+                    </s-text>
+                  ) : null}
+                </s-stack>
                 {isTagPreviewLoading ? (
                   <s-text color="subdued">Produkte werden geladen…</s-text>
                 ) : tagPreview.products.length === 0 ? (
@@ -777,111 +742,20 @@ export default function RuleEditor() {
                   </s-text>
                 ) : (
                   <>
-                    <s-text color="subdued">
-                      {tagPreview.products.length} Produkt(e)
-                      {tagPreview.truncated ? " (Auszug, es gibt weitere)" : ""}
-                    </s-text>
-                    <s-stack direction="block" gap="base">
-                      {tagPreview.products.map((product) => (
-                        <s-box
-                          key={product.id}
-                          padding="base"
-                          borderWidth="base"
-                          borderRadius="base"
-                        >
-                          <s-stack direction="block" gap="base">
-                            <s-stack
-                              direction="inline"
-                              gap="base"
-                              alignItems="center"
-                            >
-                              {product.image ? (
-                                <s-thumbnail
-                                  src={product.image}
-                                  alt={product.title}
-                                  size="small"
-                                />
-                              ) : null}
-                              <s-stack direction="block" gap="base">
-                                <s-text type="strong">{product.title}</s-text>
-                                <s-text color="subdued">
-                                  {product.includedVariantCount === 0
-                                    ? "Alle Varianten ausgeschlossen"
-                                    : product.includedVariantCount ===
-                                        product.variants.length
-                                      ? `${product.variants.length} Variante(n) rabattiert`
-                                      : `${product.includedVariantCount} von ${product.variants.length} Variante(n) rabattiert`}
-                                </s-text>
-                              </s-stack>
-                            </s-stack>
-                            {product.variants.some(
-                              (variant) => variant.excluded,
-                            ) ? (
-                              <s-text color="subdued">
-                                Ausgeschlossen:{" "}
-                                {product.variants
-                                  .filter((variant) => variant.excluded)
-                                  .map((variant) => variant.title)
-                                  .join(", ")}
-                              </s-text>
-                            ) : null}
-                          </s-stack>
-                        </s-box>
-                      ))}
-                    </s-stack>
+                    {tagPreview.truncated ? (
+                      <s-text color="subdued">
+                        Es werden maximal 100 Produkte angezeigt.
+                      </s-text>
+                    ) : null}
+                    <TagProductList
+                      products={tagPreview.products}
+                      excludedVariants={excludedVariants}
+                      onExcludedVariantsChange={setExcludedVariants}
+                    />
                   </>
                 )}
               </s-stack>
             ) : null}
-
-            <s-text type="strong">Ausgeschlossene Varianten</s-text>
-            <s-text color="subdued">
-              Varianten, die trotz passendem Produkt-Tag keinen Rabatt erhalten
-              sollen.
-            </s-text>
-            <AppActionButton onAction={pickExcludedVariants}>
-              Varianten ausschließen
-            </AppActionButton>
-
-            {excludedVariants.length === 0 ? (
-              <s-text color="subdued">Keine Varianten ausgeschlossen.</s-text>
-            ) : (
-              <s-stack direction="block" gap="base">
-                {excludedVariants.map((variant) => (
-                  <s-box
-                    key={variant.id}
-                    padding="base"
-                    borderWidth="base"
-                    borderRadius="base"
-                  >
-                    <s-stack
-                      direction="inline"
-                      gap="base"
-                      alignItems="center"
-                      justifyContent="space-between"
-                    >
-                      <s-stack direction="inline" gap="base" alignItems="center">
-                        {variant.image ? (
-                          <s-thumbnail
-                            src={variant.image}
-                            alt={variant.title}
-                            size="small"
-                          />
-                        ) : null}
-                        <s-text>{variant.title || variant.id}</s-text>
-                      </s-stack>
-                      <AppActionButton
-                        variant="tertiary"
-                        tone="critical"
-                        onAction={() => removeExcludedVariant(variant.id)}
-                      >
-                        Entfernen
-                      </AppActionButton>
-                    </s-stack>
-                  </s-box>
-                ))}
-              </s-stack>
-            )}
           </s-stack>
         </s-section>
       ) : (
