@@ -41,8 +41,16 @@ function stripCodeScheduling(codes: RuleCode[]): RuleCode[] {
 export type RuleValueType = "percentage" | "fixedAmount";
 export type RuleStatus = "active" | "draft";
 export type RuleDiscountType = "automatic" | "code";
+export type RuleDiscountMode = "standard" | "quantity";
 export type RuleSelectionMode = "variants" | "condition" | "tags";
 export type RuleCondition = "not_on_sale";
+
+/** A quantity threshold with its own discount value. */
+export type RuleQuantityTier = {
+  minQuantity: number;
+  valueType: RuleValueType;
+  value: number;
+};
 
 /** Conditions the app supports for automatic (rule-based) variant selection. */
 const ALLOWED_CONDITIONS: readonly string[] = ["not_on_sale"];
@@ -73,11 +81,13 @@ export interface RuleData {
   title: string;
   status: RuleStatus;
   discountType: RuleDiscountType;
+  discountMode: RuleDiscountMode;
   selectionMode: RuleSelectionMode;
   condition: string;
   tags: string[];
   valueType: RuleValueType;
   value: number;
+  quantityTiers: RuleQuantityTier[];
   message: string | null;
   variants: RuleVariant[];
   excludedVariants: RuleVariant[];
@@ -91,11 +101,13 @@ export interface RuleFormInput {
   title: string;
   status: RuleStatus;
   discountType: RuleDiscountType;
+  discountMode: RuleDiscountMode;
   selectionMode: RuleSelectionMode;
   condition: string;
   tags: string[];
   valueType: RuleValueType;
   value: number;
+  quantityTiers: RuleQuantityTier[];
   message?: string | null;
   variants: RuleVariant[];
   excludedVariants: RuleVariant[];
@@ -107,11 +119,13 @@ interface RuleDoc {
   title: string;
   status: string;
   discountType: string;
+  discountMode?: string;
   selectionMode: string;
   condition: string;
   tags: string[];
   valueType: string;
   value: number;
+  quantityTiers?: RuleQuantityTier[];
   message: string | null;
   variants: RuleVariant[];
   excludedVariants: RuleVariant[];
@@ -196,6 +210,34 @@ function parseSelectionMode(value: string | undefined): RuleSelectionMode {
   return "variants";
 }
 
+function parseDiscountMode(value: string | undefined): RuleDiscountMode {
+  return value === "quantity" ? "quantity" : "standard";
+}
+
+function normalizeQuantityTiers(
+  tiers: RuleQuantityTier[] | undefined,
+): RuleQuantityTier[] {
+  if (!Array.isArray(tiers)) return [];
+  const seen = new Set<number>();
+  const result: RuleQuantityTier[] = [];
+  for (const tier of tiers) {
+    if (!tier || typeof tier !== "object") continue;
+    const minQuantity = Math.floor(Number(tier.minQuantity));
+    if (!Number.isFinite(minQuantity) || minQuantity < 1 || seen.has(minQuantity)) {
+      continue;
+    }
+    const value = Number(tier.value);
+    if (!Number.isFinite(value) || value <= 0) continue;
+    seen.add(minQuantity);
+    result.push({
+      minQuantity,
+      valueType: tier.valueType === "fixedAmount" ? "fixedAmount" : "percentage",
+      value: Math.max(0, value),
+    });
+  }
+  return result.sort((a, b) => a.minQuantity - b.minQuantity);
+}
+
 function docToRuleData(id: string, data: RuleDoc): RuleData {
   return {
     id,
@@ -203,11 +245,13 @@ function docToRuleData(id: string, data: RuleDoc): RuleData {
     title: data.title,
     status: data.status === "active" ? "active" : "draft",
     discountType: data.discountType === "code" ? "code" : "automatic",
+    discountMode: parseDiscountMode(data.discountMode),
     selectionMode: parseSelectionMode(data.selectionMode),
     condition: data.condition ?? "",
     tags: normalizeTags(data.tags),
     valueType: data.valueType === "fixedAmount" ? "fixedAmount" : "percentage",
     value: typeof data.value === "number" ? data.value : 0,
+    quantityTiers: normalizeQuantityTiers(data.quantityTiers),
     message: data.message ?? null,
     variants: normalizeVariants(data.variants),
     excludedVariants: normalizeVariants(data.excludedVariants),
@@ -220,21 +264,28 @@ function docToRuleData(id: string, data: RuleDoc): RuleData {
 
 function sanitize(input: RuleFormInput) {
   const selectionMode = parseSelectionMode(input.selectionMode);
+  const discountMode = parseDiscountMode(input.discountMode);
   const condition =
     selectionMode === "condition"
       ? ALLOWED_CONDITIONS.includes(input.condition)
         ? input.condition
         : "not_on_sale"
       : "";
+  const quantityTiers =
+    discountMode === "quantity"
+      ? normalizeQuantityTiers(input.quantityTiers ?? [])
+      : [];
   return {
     title: input.title.trim() || "Untitled rule",
     status: input.status === "active" ? "active" : "draft",
     discountType: input.discountType === "code" ? "code" : "automatic",
+    discountMode,
     selectionMode,
     condition,
     tags: selectionMode === "tags" ? normalizeTags(input.tags ?? []) : [],
     valueType: input.valueType === "fixedAmount" ? "fixedAmount" : "percentage",
     value: Number.isFinite(input.value) ? Math.max(0, input.value) : 0,
+    quantityTiers,
     message: input.message?.trim() ? input.message.trim() : null,
     variants:
       selectionMode === "variants" ? normalizeVariants(input.variants ?? []) : [],
@@ -558,7 +609,9 @@ export async function buildDiscountConfig(
 ) {
   const configRules = [];
   for (const rule of rules) {
-    if (rule.status !== "active" || !ruleHasTargets(rule)) continue;
+    if (rule.status !== "active" || !ruleHasTargets(rule) || !ruleHasDiscountValue(rule)) {
+      continue;
+    }
 
     let variantIds: string[] = [];
     if (rule.selectionMode === "variants") {
@@ -575,10 +628,12 @@ export async function buildDiscountConfig(
     configRules.push({
       id: rule.id,
       status: "active" as const,
+      discountMode: rule.discountMode,
       selectionMode:
         rule.selectionMode === "condition" ? ("condition" as const) : ("variants" as const),
       valueType: rule.valueType,
       value: rule.value,
+      quantityTiers: rule.quantityTiers,
       message: rule.message ?? "",
       ...(rule.selectionMode === "condition"
         ? { condition: rule.condition }
@@ -598,6 +653,14 @@ function ruleHasTargets(rule: RuleData): boolean {
     return rule.tags.length > 0;
   }
   return rule.variants.length > 0;
+}
+
+/** Whether a rule has a usable discount value for sync. */
+function ruleHasDiscountValue(rule: RuleData): boolean {
+  if (rule.discountMode === "quantity") {
+    return rule.quantityTiers.length > 0;
+  }
+  return rule.value > 0;
 }
 
 /**
@@ -637,7 +700,7 @@ export async function syncCodeRule(
   }
 
   const config = await buildDiscountConfig(admin, [rule]);
-  const ruleLive = rule.status === "active" && ruleHasTargets(rule);
+  const ruleLive = rule.status === "active" && ruleHasTargets(rule) && ruleHasDiscountValue(rule);
   const updatedCodes: RuleCode[] = [];
 
   for (const code of rule.codes) {

@@ -11,9 +11,9 @@ import {
 import { RuleEditorPage } from "../components/rule-editor-page";
 
 const EDITOR_CONFIG = {
-  discountMode: "standard" as const,
-  listPath: "/app",
-  editPath: "/app/rules",
+  discountMode: "quantity" as const,
+  listPath: "/app/quantity",
+  editPath: "/app/quantity",
 };
 
 export const loader = (args: LoaderFunctionArgs) =>
@@ -22,7 +22,7 @@ export const loader = (args: LoaderFunctionArgs) =>
 export const action = (args: ActionFunctionArgs) =>
   saveRuleEditor(args, EDITOR_CONFIG);
 
-export default function StandardRuleEditorRoute() {
+export default function QuantityRuleEditorRoute() {
   return <RuleEditorPage />;
 }
 

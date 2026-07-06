@@ -16,6 +16,9 @@ import {
  * by the admin app. Because matching happens per variant/line, one variant of a
  * product can be discounted while its siblings are not.
  *
+ * Quantity rules apply tiered discounts when the cart line quantity meets or
+ * exceeds a configured minimum; the highest matching tier wins.
+ *
  * @param {RunInput} input
  * @returns {CartLinesDiscountsGenerateRunResult}
  */
@@ -41,42 +44,62 @@ export function cartLinesDiscountsGenerateRun(input) {
     }
 
     const variantId = line.merchandise.id;
+    const quantity = toInt(line?.quantity, 1);
     const unitPrice = toNumber(line?.cost?.amountPerQuantity?.amount);
     const compareAtRaw = line?.cost?.compareAtAmountPerQuantity?.amount;
     const compareAt = compareAtRaw == null ? null : toNumber(compareAtRaw);
 
     // Among the rules that apply to this line, pick the one that reduces it most.
     let bestRule = null;
+    let bestTier = null;
     let bestReduction = 0;
     for (const rule of rules) {
       if (!ruleAppliesToLine(rule, variantId, unitPrice, compareAt)) {
         continue;
       }
+      const tier =
+        rule.discountMode === "quantity"
+          ? bestMatchingTier(rule.quantityTiers, quantity)
+          : null;
+      const valueType =
+        rule.discountMode === "quantity" ? tier?.valueType : rule.valueType;
+      const value = rule.discountMode === "quantity" ? tier?.value : rule.value;
+      if (!valueType || value == null || value <= 0) {
+        continue;
+      }
       const reduction =
-        rule.valueType === "fixedAmount"
-          ? Math.min(rule.value, unitPrice)
-          : (unitPrice * rule.value) / 100;
+        valueType === "fixedAmount"
+          ? Math.min(value, unitPrice)
+          : (unitPrice * value) / 100;
       if (reduction > bestReduction) {
         bestReduction = reduction;
         bestRule = rule;
+        bestTier = tier;
       }
     }
     if (!bestRule || bestReduction <= 0) {
       continue;
     }
 
+    const appliedValueType =
+      bestRule.discountMode === "quantity"
+        ? bestTier.valueType
+        : bestRule.valueType;
+    const appliedValue =
+      bestRule.discountMode === "quantity" ? bestTier.value : bestRule.value;
+
     candidates.push({
       message: bestRule.message || undefined,
       targets: [{ cartLine: { id: line.id } }],
       value:
-        bestRule.valueType === "fixedAmount"
+        appliedValueType === "fixedAmount"
           ? {
               fixedAmount: {
-                amount: round2(bestRule.value).toFixed(2),
+                amount: round2(appliedValue).toFixed(2),
                 appliesToEachItem: true,
               },
             }
-          : { percentage: { value: clampPercent(bestRule.value) } },
+          : { percentage: { value: clampPercent(appliedValue) } },
     });
   }
 
@@ -105,6 +128,17 @@ function ruleAppliesToLine(rule, variantId, unitPrice, compareAt) {
   return rule.variantIds.includes(variantId);
 }
 
+/** Pick the tier with the highest minQuantity that the line quantity satisfies. */
+function bestMatchingTier(tiers, quantity) {
+  let best = null;
+  for (const tier of tiers) {
+    if (quantity >= tier.minQuantity) {
+      best = tier;
+    }
+  }
+  return best;
+}
+
 /** Evaluate a live selection condition against a cart line's prices. */
 function matchesCondition(condition, unitPrice, compareAt) {
   switch (condition) {
@@ -117,8 +151,8 @@ function matchesCondition(condition, unitPrice, compareAt) {
 }
 
 /**
- * Parse and validate the rules JSON. Keeps active rules with a positive value
- * that still target something: a condition, or at least one variant.
+ * Parse and validate the rules JSON. Keeps active rules that still target
+ * something: a condition, at least one variant, or quantity tiers.
  */
 function activeRules(rawMetafieldValue) {
   if (!rawMetafieldValue) {
@@ -135,30 +169,59 @@ function activeRules(rawMetafieldValue) {
     .map((rule) => ({
       id: rule?.id,
       status: rule?.status,
+      discountMode: rule?.discountMode === "quantity" ? "quantity" : "standard",
       selectionMode:
         rule?.selectionMode === "condition" ? "condition" : "variants",
       condition: typeof rule?.condition === "string" ? rule.condition : "",
       valueType:
         rule?.valueType === "fixedAmount" ? "fixedAmount" : "percentage",
       value: toNumber(rule?.value),
+      quantityTiers: normalizeQuantityTiers(rule?.quantityTiers),
       message: typeof rule?.message === "string" ? rule.message : "",
       variantIds: Array.isArray(rule?.variantIds)
         ? rule.variantIds.filter((id) => typeof id === "string" && id.length > 0)
         : [],
     }))
-    .filter(
-      (rule) =>
-        rule.status === "active" &&
-        rule.value > 0 &&
-        (rule.selectionMode === "condition"
+    .filter((rule) => {
+      if (rule.status !== "active") return false;
+      const hasTargets =
+        rule.selectionMode === "condition"
           ? rule.condition.length > 0
-          : rule.variantIds.length > 0),
-    );
+          : rule.variantIds.length > 0;
+      if (!hasTargets) return false;
+      if (rule.discountMode === "quantity") {
+        return rule.quantityTiers.length > 0;
+      }
+      return rule.value > 0;
+    });
+}
+
+function normalizeQuantityTiers(raw) {
+  if (!Array.isArray(raw)) return [];
+  const seen = new Set();
+  const tiers = [];
+  for (const entry of raw) {
+    const minQuantity = toInt(entry?.minQuantity, 0);
+    const value = toNumber(entry?.value);
+    if (minQuantity < 1 || value <= 0 || seen.has(minQuantity)) continue;
+    seen.add(minQuantity);
+    tiers.push({
+      minQuantity,
+      valueType: entry?.valueType === "fixedAmount" ? "fixedAmount" : "percentage",
+      value,
+    });
+  }
+  return tiers.sort((a, b) => a.minQuantity - b.minQuantity);
 }
 
 function toNumber(value) {
   const parsed = Number(value);
   return Number.isFinite(parsed) ? parsed : 0;
+}
+
+function toInt(value, fallback) {
+  const parsed = Number.parseInt(String(value), 10);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
 }
 
 function round2(value) {

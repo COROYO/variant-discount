@@ -4,7 +4,7 @@ import { cartLinesDiscountsGenerateRun } from "./cart_lines_discounts_generate_r
 const VARIANT_50G = "gid://shopify/ProductVariant/50g";
 const VARIANT_100G = "gid://shopify/ProductVariant/100g";
 
-function line(id, variantId, amount, compareAt) {
+function line(id, variantId, amount, compareAt, quantity = 1) {
   const cost = { amountPerQuantity: { amount: String(amount) } };
   if (compareAt !== undefined) {
     cost.compareAtAmountPerQuantity =
@@ -12,6 +12,7 @@ function line(id, variantId, amount, compareAt) {
   }
   return {
     id,
+    quantity,
     cost,
     merchandise: { __typename: "ProductVariant", id: variantId },
   };
@@ -213,5 +214,72 @@ describe("cartLinesDiscountsGenerateRun", () => {
       ),
     );
     expect(result.operations).toEqual([]);
+  });
+
+  test("quantity rule applies the highest matching tier", () => {
+    const result = cartLinesDiscountsGenerateRun(
+      input(
+        [
+          {
+            id: "qty1",
+            status: "active",
+            discountMode: "quantity",
+            valueType: "percentage",
+            value: 0,
+            quantityTiers: [
+              { minQuantity: 3, valueType: "percentage", value: 10 },
+              { minQuantity: 5, valueType: "percentage", value: 20 },
+            ],
+            variantIds: [VARIANT_50G],
+          },
+        ],
+        [line("gid://shopify/CartLine/1", VARIANT_50G, 10, undefined, 7)],
+      ),
+    );
+
+    const candidates = result.operations[0].productDiscountsAdd.candidates;
+    expect(candidates).toHaveLength(1);
+    expect(candidates[0].value).toEqual({ percentage: { value: 20 } });
+  });
+
+  test("quantity rule skips lines below the minimum tier", () => {
+    const result = cartLinesDiscountsGenerateRun(
+      input(
+        [
+          {
+            id: "qty2",
+            status: "active",
+            discountMode: "quantity",
+            quantityTiers: [{ minQuantity: 3, valueType: "percentage", value: 10 }],
+            variantIds: [VARIANT_50G],
+          },
+        ],
+        [line("gid://shopify/CartLine/1", VARIANT_50G, 10, undefined, 2)],
+      ),
+    );
+    expect(result.operations).toEqual([]);
+  });
+
+  test("quantity rule supports fixed amount tiers", () => {
+    const result = cartLinesDiscountsGenerateRun(
+      input(
+        [
+          {
+            id: "qty3",
+            status: "active",
+            discountMode: "quantity",
+            quantityTiers: [
+              { minQuantity: 2, valueType: "fixedAmount", value: 1.5 },
+            ],
+            variantIds: [VARIANT_50G],
+          },
+        ],
+        [line("gid://shopify/CartLine/1", VARIANT_50G, 10, undefined, 2)],
+      ),
+    );
+
+    expect(result.operations[0].productDiscountsAdd.candidates[0].value).toEqual(
+      { fixedAmount: { amount: "1.50", appliesToEachItem: true } },
+    );
   });
 });

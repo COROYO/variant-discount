@@ -13,12 +13,12 @@ import {
 import { RulesListRoute } from "../components/rules-list-page";
 
 const LIST_CONFIG = {
-  discountMode: "standard" as const,
-  heading: "Variant-Rabatte",
-  newRulePath: "/app/rules/new",
-  editRulePath: (id: string) => `/app/rules/${id}`,
+  discountMode: "quantity" as const,
+  heading: "Mengenrabatte",
+  newRulePath: "/app/quantity/new",
+  editRulePath: (id: string) => `/app/quantity/${id}`,
   emptyDescription:
-    "Noch keine Rabatt-Regeln. Lege eine Regel an, um gezielt einzelne Varianten zu rabattieren – z. B. nur die 50 g-Variante, nicht die 100 g-Variante desselben Produkts.",
+    "Noch keine Mengenrabatte. Lege Stufen-Rabatte an, die automatisch greifen, sobald Kund:innen eine Mindestmenge einer Variante in den Warenkorb legen.",
 };
 
 export const loader = ({ request }: LoaderFunctionArgs) =>
@@ -29,7 +29,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
   return handleRulesListAction(request, admin, session.shop);
 };
 
-export default function RulesIndex() {
+export default function QuantityRulesIndex() {
   const loaderData = useLoaderData<typeof loader>();
   return <RulesListRoute loaderData={loaderData} />;
 }
