@@ -16,7 +16,7 @@ const LIST_CONFIG = {
   discountMode: "quantity" as const,
   heading: "Mengenrabatte",
   newRulePath: "/app/quantity/new",
-  editRulePath: (id: string) => `/app/quantity/${id}`,
+  editRulePathPrefix: "/app/quantity",
   emptyDescription:
     "Noch keine Mengenrabatte. Lege Stufen-Rabatte an, die automatisch greifen, sobald Kund:innen eine Mindestmenge einer Variante in den Warenkorb legen.",
 };

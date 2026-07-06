@@ -9,7 +9,7 @@ import {
 } from "react-router";
 import { useAppBridge } from "@shopify/app-bridge-react";
 import type { CodeUsageInfo } from "../models/discount.server";
-import type { RuleEditorConfig } from "../models/rule-editor.server";
+import type { RuleEditorConfig } from "../models/rule-editor.shared";
 import {
   type RuleCode,
   type RuleDiscountType,
@@ -406,6 +406,10 @@ export function RuleEditorPage() {
                 value={message}
                 onChange={(event: Event) => setMessage(readValue(event))}
               />
+              <s-text color="subdued">
+                Der tatsächliche Rabatt (z.&nbsp;B. „15&nbsp;%“ oder „2,50 pro
+                Stück“) wird automatisch hinter deinen Text gesetzt.
+              </s-text>
             </s-stack>
           </div>
         </aside>

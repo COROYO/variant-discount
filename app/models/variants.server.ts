@@ -1,4 +1,10 @@
 import { adminGraphql, type AdminGraphqlClient } from "./admin-graphql.server";
+import {
+  type ProductWithVariants,
+} from "./variants.shared";
+
+export type { ProductWithVariants } from "./variants.shared";
+export { formatVariantLabel } from "./variants.shared";
 
 const SEARCH_PRODUCTS_WITH_VARIANTS = `#graphql
   query SearchProductsWithVariants($query: String!, $cursor: String) {
@@ -35,23 +41,6 @@ type SearchProductsPage = {
     }>;
   };
 };
-
-export type ProductWithVariants = {
-  id: string;
-  title: string;
-  image?: string;
-  variants: Array<{ id: string; title: string }>;
-};
-
-export function formatVariantLabel(
-  productTitle: string,
-  variantTitle: string,
-): string {
-  const product = productTitle.trim();
-  const variant = variantTitle.trim();
-  if (product && variant) return `${product} · ${variant}`;
-  return product || variant;
-}
 
 /** Search products and return them with variant rows for the picker UI. */
 export async function searchProductsWithVariants(

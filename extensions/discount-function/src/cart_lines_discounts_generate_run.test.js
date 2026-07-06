@@ -56,6 +56,7 @@ describe("cartLinesDiscountsGenerateRun", () => {
       { cartLine: { id: "gid://shopify/CartLine/1" } },
     ]);
     expect(candidates[0].value).toEqual({ percentage: { value: 20 } });
+    expect(candidates[0].message).toBe("-20% · 20 %");
   });
 
   test("emits a fixed amount per item when valueType is fixedAmount", () => {
@@ -280,6 +281,74 @@ describe("cartLinesDiscountsGenerateRun", () => {
 
     expect(result.operations[0].productDiscountsAdd.candidates[0].value).toEqual(
       { fixedAmount: { amount: "1.50", appliesToEachItem: true } },
+    );
+  });
+
+  test("appends discount to cart hint text", () => {
+    const result = cartLinesDiscountsGenerateRun(
+      input(
+        [
+          {
+            id: "msg1",
+            status: "active",
+            valueType: "percentage",
+            value: 15,
+            message: "Mengenrabatt",
+            variantIds: [VARIANT_50G],
+          },
+        ],
+        [line("gid://shopify/CartLine/1", VARIANT_50G, 10)],
+      ),
+    );
+
+    expect(result.operations[0].productDiscountsAdd.candidates[0].message).toBe(
+      "Mengenrabatt · 15 %",
+    );
+  });
+
+  test("uses only discount label when hint text is empty", () => {
+    const result = cartLinesDiscountsGenerateRun(
+      input(
+        [
+          {
+            id: "msg2",
+            status: "active",
+            valueType: "fixedAmount",
+            value: 3,
+            variantIds: [VARIANT_50G],
+          },
+        ],
+        [line("gid://shopify/CartLine/1", VARIANT_50G, 10)],
+      ),
+    );
+
+    expect(result.operations[0].productDiscountsAdd.candidates[0].message).toBe(
+      "3.00 pro Stück",
+    );
+  });
+
+  test("quantity rule message includes the applied tier discount", () => {
+    const result = cartLinesDiscountsGenerateRun(
+      input(
+        [
+          {
+            id: "qty-msg",
+            status: "active",
+            discountMode: "quantity",
+            message: "Staffelrabatt",
+            quantityTiers: [
+              { minQuantity: 3, valueType: "percentage", value: 10 },
+              { minQuantity: 5, valueType: "percentage", value: 20 },
+            ],
+            variantIds: [VARIANT_50G],
+          },
+        ],
+        [line("gid://shopify/CartLine/1", VARIANT_50G, 10, undefined, 7)],
+      ),
+    );
+
+    expect(result.operations[0].productDiscountsAdd.candidates[0].message).toBe(
+      "Staffelrabatt · 20 %",
     );
   });
 });

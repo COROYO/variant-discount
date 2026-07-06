@@ -4,7 +4,7 @@ import {
   formatRuleValue,
   type RuleListItem,
   type RulesListConfig,
-} from "../models/rule-editor.server";
+} from "../models/rule-editor.shared";
 import { AppActionButton } from "./app-action-button";
 import { AppNavigateButton } from "./app-navigate-button";
 
@@ -129,7 +129,7 @@ export function RulesListPage({
                   <s-stack direction="inline" gap="base" alignItems="center">
                     <AppNavigateButton
                       variant="primary"
-                      to={config.editRulePath(rule.id)}
+                      to={`${config.editRulePathPrefix}/${rule.id}`}
                     >
                       Bearbeiten
                     </AppNavigateButton>

@@ -16,7 +16,7 @@ const LIST_CONFIG = {
   discountMode: "standard" as const,
   heading: "Variant-Rabatte",
   newRulePath: "/app/rules/new",
-  editRulePath: (id: string) => `/app/rules/${id}`,
+  editRulePathPrefix: "/app/rules",
   emptyDescription:
     "Noch keine Rabatt-Regeln. Lege eine Regel an, um gezielt einzelne Varianten zu rabattieren – z. B. nur die 50 g-Variante, nicht die 100 g-Variante desselben Produkts.",
 };

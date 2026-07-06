@@ -89,7 +89,11 @@ export function cartLinesDiscountsGenerateRun(input) {
       bestRule.discountMode === "quantity" ? bestTier.value : bestRule.value;
 
     candidates.push({
-      message: bestRule.message || undefined,
+      message: buildCartMessage(
+        bestRule.message,
+        appliedValueType,
+        appliedValue,
+      ),
       targets: [{ cartLine: { id: line.id } }],
       value:
         appliedValueType === "fixedAmount"
@@ -230,4 +234,22 @@ function round2(value) {
 
 function clampPercent(value) {
   return Math.max(0, Math.min(100, value));
+}
+
+/** Human-readable discount value for the cart label. */
+function formatDiscountLabel(valueType, value) {
+  if (valueType === "fixedAmount") {
+    return `${round2(value).toFixed(2)} pro Stück`;
+  }
+  return `${clampPercent(value)} %`;
+}
+
+/** Append the applied discount after an optional merchant hint. */
+function buildCartMessage(hint, valueType, value) {
+  const discountLabel = formatDiscountLabel(valueType, value);
+  const trimmedHint = typeof hint === "string" ? hint.trim() : "";
+  if (trimmedHint && discountLabel) {
+    return `${trimmedHint} · ${discountLabel}`;
+  }
+  return trimmedHint || discountLabel || undefined;
 }

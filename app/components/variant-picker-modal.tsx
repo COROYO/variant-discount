@@ -4,7 +4,7 @@ import type { RuleVariant } from "../models/rules.server";
 import {
   formatVariantLabel,
   type ProductWithVariants,
-} from "../models/variants.server";
+} from "../models/variants.shared";
 import { AppActionButton } from "./app-action-button";
 import styles from "../styles/variant-picker-modal.module.css";
 
